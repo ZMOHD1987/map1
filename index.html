@@ -57,8 +57,8 @@
             <label><input type='checkbox' class='sector-filter' value='10'> المزارع 10</label>
             <label><input type='checkbox' class='sector-filter' value='11'> المنشآت الصناعية والمخابز الاوتوماتيكية 11</label>
             <label><input type='checkbox' class='sector-filter' value='12'> المنشآت الفندقية 12</label>
-            <label><input type='checkbox' class='sector-filter' value='13'> الشارقة مدينة صحية 13</label>
-            <label><input type='checkbox' class='sector-filter' value='14'> تعهدات المواد الغذائية (التموين) 14</label>
+            <label><input type='checkbox' class='sector-filter' value='13'> تعهدات المواد الغذائية (التموين) 13</label>
+            <label><input type='checkbox' class='sector-filter' value='14'> الشارقة مدينة صحية 14</label>
         </div>
         <button onclick='filterPoints()'><i class='fas fa-check'></i> تطبيق الفلاتر</button>
         <div id='totals'></div>
@@ -4426,7 +4426,7 @@
             var filteredPoints = pointsData.filter(function(point) {
                 var actionMatch = selectedActions.length === 0 || selectedActions.includes(point.action);
                 var sectorMatch = selectedSectors.length === 0 || selectedSectors.includes(String(point.sector));
-                var searchMatch = searchText === '' || point.lic.toLowerCase().includes(searchText) || point.fname.toLowerCase().includes(searchText) || point.BrandName.toLowerCase().includes(searchText);
+                var searchMatch = searchText === '' || point.lic.toLowerCase().includes(searchText) || point.fname.toLowerCase().includes(searchText) || point.BrandName.toLowerCase().includes(searchText) || point.FacilityStatus.toLowerCase().includes(searchText);
                 return actionMatch && sectorMatch && searchMatch;
             });
             renderPoints(filteredPoints);
@@ -4455,8 +4455,8 @@
             totalsHtml += '<li>المزارع 10: ' + (sectorCounts['10'] || 0) + '</li>';
             totalsHtml += '<li>المنشآت الصناعية والمخابز الاوتوماتيكية 11: ' + (sectorCounts['11'] || 0) + '</li>';
             totalsHtml += '<li>المنشآت الفندقية 12: ' + (sectorCounts['12'] || 0) + '</li>';
-            totalsHtml += '<li>الشارقة مدينة صحية 13: ' + (sectorCounts['13'] || 0) + '</li>';
-            totalsHtml += '<li>تعهدات المواد الغذائية (التموين) 14: ' + (sectorCounts['14'] || 0) + '</li>';
+            totalsHtml += '<li>تعهدات المواد الغذائية (التموين) 13: ' + (sectorCounts['13'] || 0) + '</li>';
+            totalsHtml += '<li>الشارقة مدينة صحية 14: ' + (sectorCounts['14'] || 0) + '</li>';
             totalsHtml += '</ul><h5>الإجراءات:</h5><ul>';
             totalsHtml += '<li>انذار: ' + (actionCounts['انذار'] || 0) + '</li>';
             totalsHtml += '<li>مخالفة: ' + (actionCounts['مخالفة'] || 0) + '</li>';
