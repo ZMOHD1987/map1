@@ -28,15 +28,22 @@
     </style>
     <script src='https://unpkg.com/leaflet@1.7.1/dist/leaflet.js'></script>
     <script src='https://code.jquery.com/jquery-3.6.0.min.js'></script>
-    
-    <!-- إضافة التوجيه إلى emp.html -->
-    <script>
-        // توجيه المستخدمين إلى emp.html عند فتح الصفحة
-        window.location.href = 'emp.html';
-    </script>
 </head>
 <body>
-    <!-- محتوى الصفحة يمكن أن يوضع هنا -->
+    <!-- هنا يأتي المحتوى الخاص بك -->
+
+    <script>
+        // التحقق من حالة تسجيل الدخول
+        const isLoggedIn = <?php echo json_encode(isset($_SESSION['loggedin']) && $_SESSION['loggedin']); ?>;
+
+        if (!isLoggedIn) {
+            // إذا لم يكن المستخدم مسجلاً للدخول، ابق في الصفحة الحالية
+            // يمكنك إضافة رسالة ترحيب أو تعليمات هنا
+        } else {
+            // إذا كان مسجلاً للدخول، يمكنك توجيهه إلى emp.html
+            window.location.href = 'emp.html';
+        }
+    </script>
 </body>
 </html>
 
