@@ -63,18 +63,67 @@
         <button onclick='filterPoints()'><i class='fas fa-check'></i> تطبيق الفلاتر</button>
         <div id='totals'></div>
     </div>
-    <div id='info'>
-        <h3>معلومات النقطة</h3>
-        <div><strong>الاسم: </strong><span id='info-name'></span></div>
-        <div><strong>العلامة التجارية: </strong><span id='info-BrandName'></span></div>
-        <div><strong>رقم الرخصة: </strong><span id='info-lic'></span></div>
-        <div><strong>المنطقة: </strong><span id='info-area'></span></div>
-        <div><strong>القطاع الجغرافي: </strong><span id='info-sector'></span></div>
-        <div><strong>الموقع التفصيلي: </strong><span id='info-AREA2'></span></div>
-        <div><strong>حالة المنشأة: </strong><span id='info-FacilityStatus'></span></div>
-        <div><strong>شهادة الممارسات الصحية: </strong><span id='info-SHJFSP'></span></div>
-        <div><strong>فئة الخطورة: </strong><span id='info-HazardClass'></span></div>
-    </div>
+<div id='info'>
+    <h3>معلومات النقطة</h3>
+    <div><strong>الاسم: </strong><span id='info-name'>اسم المنشأة</span></div>
+    <div><strong>العلامة التجارية: </strong><span id='info-BrandName'>العلامة التجارية</span></div>
+    <div><strong>رقم الرخصة: </strong><span id='info-lic'>12345</span></div>
+    <div><strong>المنطقة: </strong><span id='info-area'>المنطقة</span></div>
+    <div><strong>القطاع الجغرافي: </strong><span id='info-sector'>القطاع الجغرافي</span></div>
+    <div><strong>الموقع التفصيلي: </strong><span id='info-AREA2'>الموقع التفصيلي</span></div>
+    <div><strong>حالة المنشأة: </strong><span id='info-FacilityStatus'>حالة المنشأة</span></div>
+    <div><strong>شهادة الممارسات الصحية: </strong><span id='info-SHJFSP'>شهادة الممارسات الصحية</span></div>
+    <div><strong>فئة الخطورة: </strong><span id='info-HazardClass'>فئة الخطورة</span></div>
+
+    <!-- زر إرسال البيانات عبر WhatsApp كأيقونة -->
+    <button onclick="sendWhatsApp()" style="background:none; border:none; cursor:pointer;">
+        <i class="fab fa-whatsapp fa-2x" style="color: #25D366;"></i>
+    </button>
+    
+    <!-- زر إرسال البيانات عبر البريد الإلكتروني كأيقونة -->
+    <button onclick="sendEmail()" style="background:none; border:none; cursor:pointer;">
+        <i class="fas fa-envelope fa-2x" style="color: #0072C6;"></i>
+    </button>
+</div>
+
+<script>
+// الدالة لإرسال البيانات عبر واتساب
+function sendWhatsApp() {
+    const name = document.getElementById('info-name').textContent;
+    const brandName = document.getElementById('info-BrandName').textContent;
+    const lic = document.getElementById('info-lic').textContent;
+    const area = document.getElementById('info-area').textContent;
+    const sector = document.getElementById('info-sector').textContent;
+    const AREA2 = document.getElementById('info-AREA2').textContent;
+    const status = document.getElementById('info-FacilityStatus').textContent;
+    const SHJFSP = document.getElementById('info-SHJFSP').textContent;
+    const hazardClass = document.getElementById('info-HazardClass').textContent;
+    
+    const message = `معلومات النقطة:\nالاسم: ${name}\nالعلامة التجارية: ${brandName}\nرقم الرخصة: ${lic}\nالمنطقة: ${area}\nالقطاع الجغرافي: ${sector}\nالموقع التفصيلي: ${AREA2}\nحالة المنشأة: ${status}\nشهادة الممارسات الصحية: ${SHJFSP}\nفئة الخطورة: ${hazardClass}`;
+    
+    const whatsappURL = `https://wa.me/?text=${encodeURIComponent(message)}`;
+    window.open(whatsappURL, '_blank');
+}
+
+// الدالة لإرسال البيانات عبر البريد الإلكتروني
+function sendEmail() {
+    const name = document.getElementById('info-name').textContent;
+    const brandName = document.getElementById('info-BrandName').textContent;
+    const lic = document.getElementById('info-lic').textContent;
+    const area = document.getElementById('info-area').textContent;
+    const sector = document.getElementById('info-sector').textContent;
+    const AREA2 = document.getElementById('info-AREA2').textContent;
+    const status = document.getElementById('info-FacilityStatus').textContent;
+    const SHJFSP = document.getElementById('info-SHJFSP').textContent;
+    const hazardClass = document.getElementById('info-HazardClass').textContent;
+    
+    const subject = "معلومات النقطة";
+    const body = `معلومات النقطة:\nالاسم: ${name}\nالعلامة التجارية: ${brandName}\nرقم الرخصة: ${lic}\nالمنطقة: ${area}\nالقطاع الجغرافي: ${sector}\nالموقع التفصيلي: ${AREA2}\nحالة المنشأة: ${status}\nشهادة الممارسات الصحية: ${SHJFSP}\nفئة الخطورة: ${hazardClass}`;
+    
+    const mailtoURL = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.open(mailtoURL, '_blank');
+}
+</script>
     <script>
         function toggleVisibility(id) {
             var element = document.getElementById(id);
