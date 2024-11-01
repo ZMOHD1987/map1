@@ -63,19 +63,18 @@
         <button onclick='filterPoints()'><i class='fas fa-check'></i> تطبيق الفلاتر</button>
         <div id='totals'></div>
     </div>
-
-<div id='info'>
+<div id="info">
     <h3>معلومات النقطة</h3>
-    <div><strong>الاسم: </strong><span id='info-name'>اسم المنشأة</span></div>
-    <div><strong>العلامة التجارية: </strong><span id='info-BrandName'>العلامة التجارية</span></div>
-    <div><strong>رقم الرخصة: </strong><span id='info-lic'>12345</span></div>
-    <div><strong>المنطقة: </strong><span id='info-area'>المنطقة</span></div>
-    <div><strong>القطاع الجغرافي: </strong><span id='info-sector'>القطاع الجغرافي</span></div>
-    <div><strong>الموقع التفصيلي: </strong><span id='info-AREA2'>الموقع التفصيلي</span></div>
-    <div><strong>حالة المنشأة: </strong><span id='info-FacilityStatus'>حالة المنشأة</span></div>
-    <div><strong>شهادة الممارسات الصحية: </strong><span id='info-SHJFSP'>شهادة الممارسات الصحية</span></div>
-    <div><strong>فئة الخطورة: </strong><span id='info-HazardClass'>فئة الخطورة</span></div>
-    <div><strong>الإحداثيات: </strong><span id="info-coordinates">الإحداثيات</span></div>
+    <div><strong>الاسم: </strong><span id="info-name">اسم المنشأة</span></div>
+    <div><strong>العلامة التجارية: </strong><span id="info-BrandName">العلامة التجارية</span></div>
+    <div><strong>رقم الرخصة: </strong><span id="info-lic">12345</span></div>
+    <div><strong>المنطقة: </strong><span id="info-area">المنطقة</span></div>
+    <div><strong>القطاع الجغرافي: </strong><span id="info-sector">القطاع الجغرافي</span></div>
+    <div><strong>الموقع التفصيلي: </strong><span id="info-AREA2">الموقع التفصيلي</span></div>
+    <div><strong>حالة المنشأة: </strong><span id="info-FacilityStatus">حالة المنشأة</span></div>
+    <div><strong>شهادة الممارسات الصحية: </strong><span id="info-SHJFSP">شهادة الممارسات الصحية</span></div>
+    <div><strong>فئة الخطورة: </strong><span id="info-HazardClass">فئة الخطورة</span></div>
+   <div><strong>الإحداثيات: </strong><span id="info-coordinates">الإحداثيات</span></div>
 
     <!-- زر إرسال البيانات عبر WhatsApp كأيقونة -->
     <button onclick="sendWhatsApp()" style="background:none; border:none; cursor:pointer;">
@@ -85,9 +84,9 @@
     <!-- زر إرسال البيانات عبر البريد الإلكتروني كأيقونة -->
     <button onclick="sendEmail()" style="background:none; border:none; cursor:pointer;">
         <i class="fas fa-envelope fa-2x" style="color: #0072C6;"></i>
-    </button>
-</div>
 
+ 
+</div>
 <script>
 // الدالة لإرسال البيانات عبر واتساب
 function sendWhatsApp() {
@@ -100,9 +99,14 @@ function sendWhatsApp() {
     const status = document.getElementById('info-FacilityStatus').textContent;
     const SHJFSP = document.getElementById('info-SHJFSP').textContent;
     const hazardClass = document.getElementById('info-HazardClass').textContent;
-    const coordinates = document.getElementById('info-coordinates').textContent;
+    
+    // الحصول على الإحداثيات والتأكد من إزالة أي مسافات إضافية
+    let coordinates = document.getElementById('info-coordinates').textContent.trim();
+    coordinates = coordinates.replace(/\s*,\s*/g, ","); // إزالة المسافات حول الفاصلة
 
-    const message = `معلومات النقطة:\nالاسم: ${name}\nالعلامة التجارية: ${brandName}\nرقم الرخصة: ${lic}\nالمنطقة: ${area}\nالقطاع الجغرافي: ${sector}\nالموقع التفصيلي: ${AREA2}\nحالة المنشأة: ${status}\nشهادة الممارسات الصحية: ${SHJFSP}\nفئة الخطورة: ${hazardClass}\nالاحداثيات: ${coordinates}`;
+    const googleMapsLink = `https://www.google.com/maps?q=${coordinates}`;
+
+    const message = `معلومات النقطة:\nالاسم: ${name}\nالعلامة التجارية: ${brandName}\nرقم الرخصة: ${lic}\nالمنطقة: ${area}\nالقطاع الجغرافي: ${sector}\nالموقع التفصيلي: ${AREA2}\nحالة المنشأة: ${status}\nشهادة الممارسات الصحية: ${SHJFSP}\nفئة الخطورة: ${hazardClass}\nالإحداثيات: ${coordinates}\nرابط الخريطة: ${googleMapsLink}`;
 
     const whatsappURL = `https://wa.me/?text=${encodeURIComponent(message)}`;
     window.open(whatsappURL, '_blank');
@@ -119,15 +123,23 @@ function sendEmail() {
     const status = document.getElementById('info-FacilityStatus').textContent;
     const SHJFSP = document.getElementById('info-SHJFSP').textContent;
     const hazardClass = document.getElementById('info-HazardClass').textContent;
-    const coordinates = document.getElementById('info-coordinates').textContent;
+    
+    // الحصول على الإحداثيات والتأكد من إزالة أي مسافات إضافية
+    let coordinates = document.getElementById('info-coordinates').textContent.trim();
+    coordinates = coordinates.replace(/\s*,\s*/g, ","); // إزالة المسافات حول الفاصلة
+
+    const googleMapsLink = `https://www.google.com/maps?q=${coordinates}`;
 
     const subject = "معلومات النقطة";
-    const body = `معلومات النقطة:\nالاسم: ${name}\nالعلامة التجارية: ${brandName}\nرقم الرخصة: ${lic}\nالمنطقة: ${area}\nالقطاع الجغرافي: ${sector}\nالموقع التفصيلي: ${AREA2}\nحالة المنشأة: ${status}\nشهادة الممارسات الصحية: ${SHJFSP}\nفئة الخطورة: ${hazardClass}\nالاحداثيات: ${coordinates}`;
+    const body = `معلومات النقطة:\nالاسم: ${name}\nالعلامة التجارية: ${brandName}\nرقم الرخصة: ${lic}\nالمنطقة: ${area}\nالقطاع الجغرافي: ${sector}\nالموقع التفصيلي: ${AREA2}\nحالة المنشأة: ${status}\nشهادة الممارسات الصحية: ${SHJFSP}\nفئة الخطورة: ${hazardClass}\nالإحداثيات: ${coordinates}\nرابط الخريطة: ${googleMapsLink}`;
 
     const mailtoURL = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.open(mailtoURL, '_blank');
 }
 </script>
+
+
+    <script>
         function toggleVisibility(id) {
             var element = document.getElementById(id);
             if (element.classList.contains('hidden')) {
@@ -139,7 +151,7 @@ function sendEmail() {
         var map = L.map('map').setView([25.276987, 55.296249], 10);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        }).addTo(map);
+         }).addTo(map);
         var allPointsLayer = L.layerGroup().addTo(map);
         var pointsData = [];
         pointsData.push({latitude: 25.37318644516606, longitude: 55.67655110956221, AREA2: '', sector: 10, color: 'cyan', lightColor: 'lightcyan', sectorColor: 'saddlebrown', fname: 'عبيد على سالم بن شنة الكتبي', SHJFSP: 'غير مسجل', HazardClass: '', area: 'الزبير', BrandName: '', FacilityStatus: 'نشط', lic: '-54'});
