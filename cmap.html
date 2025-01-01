@@ -24,6 +24,12 @@
         @media (max-width: 768px) {
             #controls, #info { width: 150px; font-size: 12px; }
             button { font-size: 12px; padding: 5px; }
+            #map { height: calc(100vh - 50px); }
+        }
+        @media (max-width: 480px) {
+            #controls, #info { width: 120px; font-size: 10px; }
+            button { font-size: 10px; padding: 4px; }
+            #map { height: calc(100vh - 70px); }
         }
     </style>
     <script src='https://unpkg.com/leaflet@1.7.1/dist/leaflet.js'></script>
@@ -98,34 +104,14 @@ function sendWhatsApp() {
 
     const googleMapsLink = `https://www.google.com/maps?q=${coordinates}`;
 
-    const message = `معلومات النقطة:\nالاسم: ${name}\nالعلامة التجارية: ${brandName}\nرقم الرخصة: ${lic}\nالمنطقة: ${area}\nالقطاع الجغرافي: ${sector}\nالموقع التفصيلي: ${AREA2}\nحالة المنشأة: ${status}\nالإحداثيات: ${coordinates}\nرابط الخريطة: ${googleMapsLink}`;
-
-    const whatsappURL = `https://wa.me/?text=${encodeURIComponent(message)}`;
-    window.open(whatsappURL, '_blank');
-}
-// الدالة لإرسال البيانات عبر البريد الإلكتروني
-function sendEmail() {
-    const name = document.getElementById('info-name').textContent;
-    const brandName = document.getElementById('info-BrandName').textContent;
-    const lic = document.getElementById('info-lic').textContent;
-    const area = document.getElementById('info-area').textContent;
-    const sector = document.getElementById('info-sector').textContent;
-    const AREA2 = document.getElementById('info-AREA2').textContent;
-    const status = document.getElementById('info-FacilityStatus').textContent;
-     
-    // الحصول على الإحداثيات والتأكد من إزالة أي مسافات إضافية
-    let coordinates = document.getElementById('info-coordinates').textContent.trim();
-    coordinates = coordinates.replace(/\s*,\s*/g, ","); // إزالة المسافات حول الفاصلة
-
-    const googleMapsLink = `https://www.google.com/maps?q=${coordinates}`;
-
-    const subject = "معلومات النقطة";
-    const body = `معلومات النقطة:\nالاسم: ${name}\nالعلامة التجارية: ${brandName}\nرقم الرخصة: ${lic}\nالمنطقة: ${area}\nالقطاع الجغرافي: ${sector}\nالموقع التفصيلي: ${AREA2}\nحالة المنشأة: ${status}\nالإحداثيات: ${coordinates}\nرابط الخريطة: ${googleMapsLink}`;
+    const message = `معلومات النقطة:\nالاسم: ${name}\nالعلامة التجارية: ${brandName}\nرقم الرخصة: ${lic}\nالمنطقة: ${area}\nالقطاع الجغرافي: ${sector}\nالموقع التفصيلي: ${AREA2
 
     const mailtoURL = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.open(mailtoURL, '_blank');
 }
 </script>
+
+
 
 
     <script>
