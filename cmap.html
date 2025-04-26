@@ -10639,14 +10639,16 @@ function sendEmail() {
     </script>
 
 <script>
-// تشغيل الصوت عند الاقتراب
+
+// إضافة تنبيه بالصوت
 var alertAudio = new Audio('https://www.soundjay.com/button/beep-07.wav');
 
-// طلب إذن الإشعارات
+// طلب صلاحيات الإشعار
 if ("Notification" in window && Notification.permission !== "granted") {
     Notification.requestPermission();
 }
 
+// حساب المسافة بين نقطتين
 function getDistance(lat1, lon1, lat2, lon2) {
     const R = 6371e3;
     const φ1 = lat1 * Math.PI / 180;
@@ -10662,44 +10664,52 @@ function getDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-let notifiedPoints = [];
+// حساب زمن القيادة
+function getDrivingTimeInMinutes(distanceMeters) {
+    const speedMetersPerMinute = 667; // 40 كم/س
+    return distanceMeters / speedMetersPerMinute;
+}
 
-function checkProximity() {
+// البحث عن أقرب إنذار
+function findNearestWarning() {
     if (!navigator.geolocation) {
-        console.log("الموقع غير مدعوم في هذا المتصفح");
+        alert("الموقع الجغرافي غير مدعوم في هذا المتصفح.");
         return;
     }
 
     navigator.geolocation.getCurrentPosition(position => {
         const userLat = position.coords.latitude;
         const userLon = position.coords.longitude;
+        let nearestPoint = null;
+        let minTime = Infinity;
 
         pointsData.forEach(point => {
             if (point.action === 'انذار') {
                 const distance = getDistance(userLat, userLon, point.latitude, point.longitude);
-                if (distance < 500 && !notifiedPoints.includes(point.lic)) {
-                    const timeEst = Math.round((distance / 80) * 60);
-
-                    // تشغيل الصوت
-                    alertAudio.play();
-
-                    // إظهار إشعار
-                    if ("Notification" in window && Notification.permission === "granted") {
-                        new Notification("تنبيه من الخريطة", {
-                            body: `🟡 أنت على بعد ${timeEst} دقيقة من ${point.fname}`,
-                            icon: 'https://cdn-icons-png.flaticon.com/512/684/684908.png'
-                        });
-                    }
-
-                    notifiedPoints.push(point.lic); // منع التكرار
+                const time = getDrivingTimeInMinutes(distance);
+                if (time <= 10 && time < minTime) {
+                    nearestPoint = point;
+                    minTime = time;
                 }
             }
         });
+
+        if (nearestPoint) {
+            const message = `🔔 أقرب إنذار: ${nearestPoint.fname} على بعد ${Math.round(minTime)} دقيقة.`;
+            if ("Notification" in window && Notification.permission === "granted") {
+                new Notification("إنذار قريب", { body: message });
+            } else {
+                alert(message);
+            }
+            alertAudio.play();
+            window.open(`https://www.google.com/maps/dir/?api=1&destination=${nearestPoint.latitude},${nearestPoint.longitude}`, '_blank');
+        } else {
+            alert("❌ لا توجد إنذارات قريبة خلال 10 دقائق بالسيارة.");
+        }
+    }, error => {
+        alert("خطأ في تحديد الموقع.");
     });
 }
-
-setInterval(checkProximity, 30000);
 </script>
-
 </body>
 </html>
