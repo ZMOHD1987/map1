@@ -65,7 +65,13 @@
             <label><input type='checkbox' class='sector-filter' value='11'> المزارع 11</label>
         </div>
         <button onclick='filterPoints()'><i class='fas fa-check'></i> تطبيق الفلاتر</button>
-
+<div id="modeSelector">
+    <label>اختيار الوضع:</label>
+    <select id="mode">
+        <option value="walk">🚶‍♂️ مشي</option>
+        <option value="car">🚗 سيارة</option>
+    </select>
+</div>
         <hr>
         <label>من تاريخ:</label>
         <input type='date' id='date-from'>
@@ -96,15 +102,6 @@
     <!-- زر إرسال البيانات عبر البريد الإلكتروني كأيقونة -->
     <button onclick="sendEmail()" style="background:none; border:none; cursor:pointer;">
         <i class="fas fa-envelope fa-2x" style="color: #0072C6;"></i>
-
- 
-</div>
-<div id="modeSelector">
-    <label>اختيار الوضع:</label>
-    <select id="mode">
-        <option value="walk">🚶‍♂️ مشي</option>
-        <option value="car">🚗 سيارة</option>
-    </select>
 </div>
 
 <script>
@@ -10649,13 +10646,15 @@ function sendEmail() {
     </script>
 
 <script>
-
+// صوت التنبيه
 var alertAudio = new Audio('https://www.soundjay.com/button/beep-07.wav');
 
+// طلب إذن الإشعارات
 if ("Notification" in window && Notification.permission !== "granted") {
     Notification.requestPermission();
 }
 
+// دالة حساب المسافة
 function getDistance(lat1, lon1, lat2, lon2) {
     const R = 6371e3;
     const φ1 = lat1 * Math.PI / 180;
@@ -10670,14 +10669,17 @@ function getDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
+// دالة حساب زمن القيادة أو المشي
 function getDrivingTimeInMinutes(distanceMeters) {
     const mode = document.getElementById("mode").value;
     const speedMetersPerMinute = (mode === 'car') ? 667 : 83.33;
     return distanceMeters / speedMetersPerMinute;
 }
 
+// سجل الإشعارات لمنع التكرار
 let notified = new Set();
 
+// دالة التحقق من الانذارات القريبة
 function checkNearbyWarnings() {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(pos => {
@@ -10707,7 +10709,15 @@ function checkNearbyWarnings() {
     });
 }
 
+// فحص الإنذارات كل 30 ثانية
 setInterval(checkNearbyWarnings, 30000);
+
+// 🔥 تفعيل الفحص مباشرة عند تغيير الوضع
+document.getElementById("mode").addEventListener("change", () => {
+    notified.clear();       // مسح التنبيهات القديمة
+    checkNearbyWarnings();  // فحص فوري بالوضع الجديد
+});
 </script>
+
 </body>
 </html>
