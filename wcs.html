@@ -202,9 +202,11 @@ function sendEmail() {
             }
         }
         var map = L.map('map').setView([25.276987, 55.296249], 10);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        }).addTo(map);
+       L.tileLayer('https://tile.jawg.io/jawg-light/{z}/{x}/{y}{r}.png?access-token=YOUR_TOKEN', {
+    attribution: '&copy; Jawg Maps',
+    maxZoom: 19
+}).addTo(map);
+
         var allPointsLayer = L.layerGroup().addTo(map);
         var pointsData = [];
         pointsData.push({latitude: 25.30465293686859, longitude: 55.61231184232788, AREA2: '', sector: 1, color: 'red', lightColor: 'darkred', sectorColor: 'darkblue', fname: '', area: 'الصجعة', subarea: '', BrandName: '', FacilityStatus: 'نشط', lic: '', subunit: '', Fdate: '01/01/2025', action: 'مخالفة'});
