@@ -74,105 +74,7 @@
         <div><strong>تاريخ آخر زيارة: </strong><span id='info-Fdate'></span></div>
         <div><strong>الإجراء: </strong><span id='info-action'></span></div>
         <div><strong>الإحداثيات: </strong><span id='info-coordinates'></span></div>
-
-    <!-- زر إرسال البيانات عبر WhatsApp كأيقونة -->
-    <button onclick="sendWhatsApp()" style="background:none; border:none; cursor:pointer;">
-        <i class="fab fa-whatsapp fa-2x" style="color: #25D366;"></i>
-    </button>
-    
-    <!-- زر إرسال البيانات عبر البريد الإلكتروني كأيقونة -->
-    <button onclick="sendEmail()" style="background:none; border:none; cursor:pointer;">
-        <i class="fas fa-envelope fa-2x" style="color: #0072C6;"></i>
-</div>
-
-<script>
-// الدالة لإرسال البيانات عبر واتساب
-function sendWhatsApp() {
-    const name = document.getElementById('info-name').textContent;
-    const brandName = document.getElementById('info-BrandName').textContent;
-    const lic = document.getElementById('info-lic').textContent;
-    const area = document.getElementById('info-area').textContent;
-   const subarea = document.getElementById('info-subarea').textContent;
-    const sector = document.getElementById('info-sector').textContent;
-    const AREA2 = document.getElementById('info-AREA2').textContent;
-    const status = document.getElementById('info-FacilityStatus').textContent;
-    const Fdate= document.getElementById('info-Fdate').textContent;
-    const action = document.getElementById('info-action').textContent;
-
-
-
-    // الحصول على الإحداثيات والتأكد من إزالة أي مسافات إضافية
-    let coordinates = document.getElementById('info-coordinates').textContent.trim();
-    coordinates = coordinates.replace(/\s*,\s*/g, ","); // إزالة المسافات حول الفاصلة
-
-    // رابط خرائط جوجل
-    const googleMapsLink = `https://www.google.com/maps?q=${coordinates}`;
-
-    // الرسالة المرسلة عبر واتساب
-    const message = `معلومات النقطة:
-الاسم: ${name}
-العلامة التجارية: ${brandName}
-رقم الرخصة: ${lic}
-المنطقة: ${area}
-المنطقة الفرعية: ${subarea}
-القطاع الجغرافي: ${sector}
-الوصف التفصيلي: ${AREA2}
-حالة المنشأة: ${status}
-تاريخ آخر زيارة: ${Fdate}
-الإجراء: ${action}
-الإحداثيات: ${coordinates}
-رابط الموقع على خرائط جوجل: ${googleMapsLink}`;
-
-    // فتح رابط واتساب
-    const whatsappURL = `https://wa.me/?text=${encodeURIComponent(message)}`;
-    window.open(whatsappURL, '_blank');
-}
-
-// الدالة لإرسال البيانات عبر البريد الإلكتروني
-function sendEmail() {
-    const name = document.getElementById('info-name').textContent;
-    const brandName = document.getElementById('info-BrandName').textContent;
-    const lic = document.getElementById('info-lic').textContent;
-    const area = document.getElementById('info-area').textContent;
-    const subarea = document.getElementById('info-subarea').textContent;
-    const sector = document.getElementById('info-sector').textContent;
-    const AREA2 = document.getElementById('info-AREA2').textContent;
-    const status = document.getElementById('info-FacilityStatus').textContent;
-    const action = document.getElementById('info-action').textContent;
-    const Fdate = document.getElementById('info-Fdate').textContent;
-
-
-    // الحصول على الإحداثيات والتأكد من إزالة أي مسافات إضافية
-    let coordinates = document.getElementById('info-coordinates').textContent.trim();
-    coordinates = coordinates.replace(/\s*,\s*/g, ","); // إزالة المسافات حول الفاصلة
-
-    // رابط خرائط جوجل
-    const googleMapsLink = `https://www.google.com/maps?q=${coordinates}`;
-
-    // عنوان الرسالة
-    const subject = "معلومات النقطة";
-
-    // نص الرسالة
-    const body = `معلومات النقطة:
-الاسم: ${name}
-العلامة التجارية: ${brandName}
-رقم الرخصة: ${lic}
-المنطقة: ${area}
-المنطقة الفرعية: ${subarea}
-القطاع الجغرافي: ${sector}
-الوصف التفصيلي: ${AREA2}
-حالة المنشأة: ${status}
-تاريخ آخر زيارة: ${Fdate}
-الإجراء: ${action}
-الإحداثيات: ${coordinates}
-رابط الموقع على خرائط جوجل: ${googleMapsLink}`;
-
-    // فتح رابط البريد الإلكتروني
-    const mailtoURL = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.open(mailtoURL, '_blank');
-}
-</script>
-
+    </div>
     <script>
         function toggleVisibility(id) {
             var element = document.getElementById(id);
@@ -182,7 +84,7 @@ function sendEmail() {
                 element.classList.add('hidden');
             }
         }
-      var map = L.map('map').setView([25.329311796993366, 55.62878827116393], 15); 
+        var map = L.map('map').setView([25.276987, 55.296249], 10);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
