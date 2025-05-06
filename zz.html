@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>إشعارات الموقع</title>
+</head>
+<body>
+    <div id="modeSelector">
+        <label>اختيار الوضع:</label>
+        <select id="mode">
+            <option value="walk">🚶‍♂️ مشي</option>
+            <option value="car">🚗 سيارة</option>
+        </select>
+    </div>
+
+    <button onclick="triggerTest()">🔔 اختبار الإشعار</button>
+
+    <script>
+        var alertAudio = new Audio('https://www.soundjay.com/button/beep-07.wav');
+
+        // طلب إذن الإشعارات
+        if ("Notification" in window && Notification.permission !== "granted") {
+            Notification.requestPermission();
+        }
+
+        // دالة لحساب المسافة بين نقطتين
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3;
+            const φ1 = lat1 * Math.PI / 180;
+            const φ2 = lat2 * Math.PI / 180;
+            const Δφ = (lat2 - lat1) * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+            const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;  // المسافة بالمتر
+        }
+
+        // دالة لحساب الزمن بناءً على الوضع المختار
+        function getDrivingTimeInMinutes(distanceMeters) {
+            const modeElement = document.getElementById("mode");
+            if (!modeElement) return Infinity;
+
+            const mode = modeElement.value;
+            let speedKph;
+
+            if (mode === 'walk') {
+                speedKph = 5; // 5 كم/ساعة للمشي
+            } else {
+                const now = new Date();
+                const hour = now.getHours();
+                const minute = now.getMinutes();
+                const totalMinutes = hour * 60 + minute;
+
+                // تحديد السرعة حسب الزحام
+                if (totalMinutes >= 360 && totalMinutes < 450) {
+                    speedKph = 10;
+                } else if (totalMinutes >= 450 && totalMinutes < 570) {
+                    speedKph = 5;
+                } else if (totalMinutes >= 570 && totalMinutes < 840) {
+                    speedKph = 15;
+                } else if (totalMinutes >= 840 && totalMinutes < 1020) {
+                    speedKph = 8;
+                } else if (totalMinutes >= 1020 && totalMinutes < 1320) {
+                    speedKph = 5;
+                } else {
+                    speedKph = 20;
+                }
+            }
+
+            const speedMetersPerMinute = (speedKph * 1000) / 60;
+            return distanceMeters / speedMetersPerMinute;
+        }
+
+        const notified = new Set();
+
+        // بيانات تجريبية للمثال
+        const pointsData = [
+            {
+                action: 'انذار',
+                fname: 'مطعم الاختبار',
+                area: 'المجاز',
+                lic: '1001',
+                sector: 'غذائي',
+                Fdate: '2025-05-06',
+                latitude: 25.346,
+                longitude: 55.420
+            }
+        ];
+
+        // دالة لفحص النقاط القريبة
+        function checkNearbyWarnings() {
+            if (!navigator.geolocation) return;
+
+            navigator.geolocation.getCurrentPosition(pos => {
+                const userLat = pos.coords.latitude;
+                const userLon = pos.coords.longitude;
+
+                pointsData.forEach(point => {
+                    if (point.action === 'انذار') {
+                        const distance = getDistance(userLat, userLon, point.latitude, point.longitude);
+                        const time = getDrivingTimeInMinutes(distance);
+                        if (time <= 5 && !notified.has(point.fname)) {
+                            const msg = `
+📍 الاسم: ${point.fname}
+📍 المنطقة: ${point.area}
+📄 الرخصة: ${point.lic}
+🏢 القطاع: ${point.sector}
+📅 آخر زيارة: ${point.Fdate}
+⏳ الزمن المتوقع للوصول: ${Math.round(time)} دقيقة
+                            `;
+                            alertAudio.play();
+                            const confirmReview = confirm(msg + "هل ترغب بالمراجعة الآن؟");
+                            if (confirmReview) {
+                                window.open(`https://www.google.com/maps/dir/?api=1&destination=${point.latitude},${point.longitude}`, '_blank');
+                            }
+                            notified.add(point.fname);
+                        }
+                    }
+                });
+            }, err => {
+                alert("⚠️ خطأ في تحديد الموقع: " + err.message);
+            });
+        }
+
+        // فحص كل 30 ثانية
+        setInterval(checkNearbyWarnings, 30000);
+
+        // عند تغيير الوضع
+        document.getElementById("mode").addEventListener("change", () => {
+            notified.clear();
+            checkNearbyWarnings();
+        });
+
+        // اختبار إشعار الصوت والإشعار
+        function triggerTest() {
+            alertAudio.play();
+            if ("Notification" in window && Notification.permission === "granted") {
+                new Notification("📢 إشعار تجريبي", {
+                    body: "هذا إشعار تجريبي يعمل بنجاح 🎉",
+                    icon: "https://cdn-icons-png.flaticon.com/512/484/484167.png"
+                });
+            } else {
+                alert("🔔 الإشعارات غير مفعلة أو مرفوضة.");
+            }
+        }
+    </script>
+</body>
+</html>
