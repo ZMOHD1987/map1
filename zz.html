@@ -10678,6 +10678,7 @@ function sendEmail() {
 
 
 
+
 <script>
 var alertAudio = new Audio('https://www.soundjay.com/button/beep-07.wav');
 
@@ -10785,13 +10786,15 @@ function checkNearbyWarnings() {
 
 checkInterval = setInterval(checkNearbyWarnings, 30000);
 
-// إعادة الفحص بعد 30 ثانية من تغيير الوضع
+// تغيير الوضع يعيد الفحص بعد 30 ثانية، ويبدأ مؤقت جديد أيضًا
 let modeChangeTimeout;
 document.getElementById("mode").addEventListener("change", () => {
     notified.clear();
+    clearInterval(checkInterval);
     clearTimeout(modeChangeTimeout);
     modeChangeTimeout = setTimeout(() => {
         checkNearbyWarnings();
+        checkInterval = setInterval(checkNearbyWarnings, 30000);
     }, 30000);
 });
 </script>
