@@ -10704,24 +10704,23 @@ function getDrivingTimeInMinutes(distanceMeters) {
     let speedKph;
 
     if (mode === 'walk') {
-        speedKph = 5; // مشي ثابت
+        speedKph = 5;
     } else {
         const now = new Date();
         const totalMinutes = now.getHours() * 60 + now.getMinutes();
 
-        // سرعات تقريبية حسب أوقات الذروة
         if (totalMinutes >= 360 && totalMinutes < 450) {
-            speedKph = 10; // 6:00 - 7:30 صباحًا
+            speedKph = 10;
         } else if (totalMinutes >= 450 && totalMinutes < 570) {
-            speedKph = 5;  // 7:30 - 9:30 صباحًا (ذروة)
+            speedKph = 5;
         } else if (totalMinutes >= 570 && totalMinutes < 840) {
-            speedKph = 15; // 9:30 - 14:00 (خفيف)
+            speedKph = 15;
         } else if (totalMinutes >= 840 && totalMinutes < 1020) {
-            speedKph = 8;  // 14:00 - 17:00 (ازدحام جزئي)
+            speedKph = 8;
         } else if (totalMinutes >= 1020 && totalMinutes < 1320) {
-            speedKph = 5;  // 17:00 - 22:00 (ذروة مسائية)
+            speedKph = 5;
         } else {
-            speedKph = 20; // بعد 10 مساءً
+            speedKph = 20;
         }
     }
 
@@ -10758,9 +10757,12 @@ function showNotification(point, time) {
     }
 }
 
-const pointsData = window.pointsData || [];
+if (!window.pointsData) {
+    window.pointsData = [];
+}
 
 let notified = new Set();
+let checkInterval;
 
 function checkNearbyWarnings() {
     if (!navigator.geolocation) return;
@@ -10768,7 +10770,7 @@ function checkNearbyWarnings() {
         const userLat = pos.coords.latitude;
         const userLon = pos.coords.longitude;
 
-        pointsData.forEach(point => {
+        window.pointsData.forEach(point => {
             if (point.action === 'انذار') {
                 const distance = getDistance(userLat, userLon, point.latitude, point.longitude);
                 const time = getDrivingTimeInMinutes(distance);
@@ -10781,11 +10783,16 @@ function checkNearbyWarnings() {
     });
 }
 
-setInterval(checkNearbyWarnings, 30000);
+checkInterval = setInterval(checkNearbyWarnings, 30000);
 
+// إعادة الفحص بعد 30 ثانية من تغيير الوضع
+let modeChangeTimeout;
 document.getElementById("mode").addEventListener("change", () => {
     notified.clear();
-    checkNearbyWarnings();
+    clearTimeout(modeChangeTimeout);
+    modeChangeTimeout = setTimeout(() => {
+        checkNearbyWarnings();
+    }, 30000);
 });
 </script>
 </body>
