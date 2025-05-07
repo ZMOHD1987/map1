@@ -58,11 +58,6 @@
             <label><input type='checkbox' class='sector-filter' value='4'> القطاع 4</label>
             <label><input type='checkbox' class='sector-filter' value='5'> القطاع 5</label>
             <label><input type='checkbox' class='sector-filter' value='6'> القطاع 6</label>
-            <label><input type='checkbox' class='sector-filter' value='7'> مراكز التسوق والمناطق السياحية 7</label>
-            <label><input type='checkbox' class='sector-filter' value='8'> لمنشآت الصناعية 8</label>
-            <label><input type='checkbox' class='sector-filter' value='9'> رخصة اعتماد 9</label>
-            <label><input type='checkbox' class='sector-filter' value='10'> المقاصف المدرسية 10</label>
-            <label><input type='checkbox' class='sector-filter' value='11'> المزارع 11</label>
         </div>
         <button onclick='filterPoints()'><i class='fas fa-check'></i> تطبيق الفلاتر</button>
 <div id="modeSelector">
@@ -201,7 +196,7 @@ function sendEmail() {
                 element.classList.add('hidden');
             }
         }
-        var map = L.map('map').setView([25.276987, 55.296249], 16);
+        var map = L.map('map').setView([25.32377110822601, 55.631773457672104], 14);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
