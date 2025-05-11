@@ -2,7 +2,7 @@
 <html lang='ar' dir='rtl'>
 <head>
     <meta charset='utf-8'>
-    <title>Sharjah Municipality Waste Control SectionMap</title>
+    <title>Sharjah Municipality Waste Control Section Map</title>
     <meta name='viewport' content='width=device-width, initial-scale=1.0'>
     <link rel='stylesheet' href='https://unpkg.com/leaflet@1.7.1/dist/leaflet.css' />
     <link rel='stylesheet' href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css' />
@@ -24,20 +24,13 @@
         @media (max-width: 768px) {
             #controls, #info { width: 150px; font-size: 12px; }
             button { font-size: 12px; padding: 5px; }
-            #map { height: calc(100vh - 50px); }
-        }
-        @media (max-width: 480px) {
-            #controls, #info { width: 120px; font-size: 10px; }
-            button { font-size: 10px; padding: 4px; }
-            #map { height: calc(100vh - 70px); }
         }
     </style>
     <script src='https://unpkg.com/leaflet@1.7.1/dist/leaflet.js'></script>
     <script src='https://code.jquery.com/jquery-3.6.0.min.js'></script>
 </head>
 <body>
-<div id='map'></div>
-
+    <div id='map'></div>
     <div id='controls'>
         <input type='text' id='search-lic' placeholder='Searsh'>
         <button onclick="toggleVisibility('action-filters')"><i class='fas fa-filter'></i> الإجراء</button>
@@ -45,7 +38,7 @@
             <label><input type='checkbox' class='action-filter' value='انذار'> انذار</label>
             <label><input type='checkbox' class='action-filter' value='مخالفة'> مخالفة</label>
             <label><input type='checkbox' class='action-filter' value='عينات'> عينات</label>
-            <label><input type='checkbox' class='action-filter' value='متابعة'> متابعة</label>
+            <label><input type='checkbox' class='action-filter' value='متابعة انذار'> متابعة انذار</label>
             <label><input type='checkbox' class='action-filter' value='مغلق'> مغلق</label>
             <label><input type='checkbox' class='action-filter' value='تقرير'> تقرير</label>
             <label><input type='checkbox' class='action-filter' value='مناسب'> مناسب</label>
@@ -58,15 +51,10 @@
             <label><input type='checkbox' class='sector-filter' value='4'> القطاع 4</label>
             <label><input type='checkbox' class='sector-filter' value='5'> القطاع 5</label>
             <label><input type='checkbox' class='sector-filter' value='6'> القطاع 6</label>
+            <label><input type='checkbox' class='sector-filter' value='7'> خارج الصجعة 7</label>
+            <label><input type='checkbox' class='sector-filter' value='8'> جنوب الصجعة 8</label>
         </div>
         <button onclick='filterPoints()'><i class='fas fa-check'></i> تطبيق الفلاتر</button>
-<div id="modeSelector">
-    <label>اختيار الوضع:</label>
-    <select id="mode">
-        <option value="walk">🚶‍♂️ مشي</option>
-        <option value="car">🚗 سيارة</option>
-    </select>
-</div>
         <hr>
         <label>من تاريخ:</label>
         <input type='date' id='date-from'>
@@ -88,105 +76,7 @@
         <div><strong>تاريخ آخر زيارة: </strong><span id='info-Fdate'></span></div>
         <div><strong>الإجراء: </strong><span id='info-action'></span></div>
         <div><strong>الإحداثيات: </strong><span id='info-coordinates'></span></div>
-
-    <!-- زر إرسال البيانات عبر WhatsApp كأيقونة -->
-    <button onclick="sendWhatsApp()" style="background:none; border:none; cursor:pointer;">
-        <i class="fab fa-whatsapp fa-2x" style="color: #25D366;"></i>
-    </button>
-    
-    <!-- زر إرسال البيانات عبر البريد الإلكتروني كأيقونة -->
-    <button onclick="sendEmail()" style="background:none; border:none; cursor:pointer;">
-        <i class="fas fa-envelope fa-2x" style="color: #0072C6;"></i>
-</div>
-
-<script>
-// الدالة لإرسال البيانات عبر واتساب
-function sendWhatsApp() {
-    const name = document.getElementById('info-name').textContent;
-    const brandName = document.getElementById('info-BrandName').textContent;
-    const lic = document.getElementById('info-lic').textContent;
-    const area = document.getElementById('info-area').textContent;
-   const subarea = document.getElementById('info-subarea').textContent;
-    const sector = document.getElementById('info-sector').textContent;
-    const AREA2 = document.getElementById('info-AREA2').textContent;
-    const status = document.getElementById('info-FacilityStatus').textContent;
-    const Fdate= document.getElementById('info-Fdate').textContent;
-    const action = document.getElementById('info-action').textContent;
-
-
-
-    // الحصول على الإحداثيات والتأكد من إزالة أي مسافات إضافية
-    let coordinates = document.getElementById('info-coordinates').textContent.trim();
-    coordinates = coordinates.replace(/\s*,\s*/g, ","); // إزالة المسافات حول الفاصلة
-
-    // رابط خرائط جوجل
-    const googleMapsLink = `https://www.google.com/maps?q=${coordinates}`;
-
-    // الرسالة المرسلة عبر واتساب
-    const message = `معلومات النقطة:
-الاسم: ${name}
-العلامة التجارية: ${brandName}
-رقم الرخصة: ${lic}
-المنطقة: ${area}
-المنطقة الفرعية: ${subarea}
-القطاع الجغرافي: ${sector}
-الوصف التفصيلي: ${AREA2}
-حالة المنشأة: ${status}
-تاريخ آخر زيارة: ${Fdate}
-الإجراء: ${action}
-الإحداثيات: ${coordinates}
-رابط الموقع على خرائط جوجل: ${googleMapsLink}`;
-
-    // فتح رابط واتساب
-    const whatsappURL = `https://wa.me/?text=${encodeURIComponent(message)}`;
-    window.open(whatsappURL, '_blank');
-}
-
-// الدالة لإرسال البيانات عبر البريد الإلكتروني
-function sendEmail() {
-    const name = document.getElementById('info-name').textContent;
-    const brandName = document.getElementById('info-BrandName').textContent;
-    const lic = document.getElementById('info-lic').textContent;
-    const area = document.getElementById('info-area').textContent;
-    const subarea = document.getElementById('info-subarea').textContent;
-    const sector = document.getElementById('info-sector').textContent;
-    const AREA2 = document.getElementById('info-AREA2').textContent;
-    const status = document.getElementById('info-FacilityStatus').textContent;
-    const action = document.getElementById('info-action').textContent;
-    const Fdate = document.getElementById('info-Fdate').textContent;
-
-
-    // الحصول على الإحداثيات والتأكد من إزالة أي مسافات إضافية
-    let coordinates = document.getElementById('info-coordinates').textContent.trim();
-    coordinates = coordinates.replace(/\s*,\s*/g, ","); // إزالة المسافات حول الفاصلة
-
-    // رابط خرائط جوجل
-    const googleMapsLink = `https://www.google.com/maps?q=${coordinates}`;
-
-    // عنوان الرسالة
-    const subject = "معلومات النقطة";
-
-    // نص الرسالة
-    const body = `معلومات النقطة:
-الاسم: ${name}
-العلامة التجارية: ${brandName}
-رقم الرخصة: ${lic}
-المنطقة: ${area}
-المنطقة الفرعية: ${subarea}
-القطاع الجغرافي: ${sector}
-الوصف التفصيلي: ${AREA2}
-حالة المنشأة: ${status}
-تاريخ آخر زيارة: ${Fdate}
-الإجراء: ${action}
-الإحداثيات: ${coordinates}
-رابط الموقع على خرائط جوجل: ${googleMapsLink}`;
-
-    // فتح رابط البريد الإلكتروني
-    const mailtoURL = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.open(mailtoURL, '_blank');
-}
-</script>
-
+    </div>
     <script>
         function toggleVisibility(id) {
             var element = document.getElementById(id);
@@ -196,7 +86,7 @@ function sendEmail() {
                 element.classList.add('hidden');
             }
         }
-        var map = L.map('map').setView([25.32377110822601, 55.631773457672104], 14);
+        var map = L.map('map').setView([25.276987, 55.296249], 10);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
@@ -668,7 +558,6 @@ function sendEmail() {
         pointsData.push({latitude: 25.309694, longitude: 55.640056, AREA2: '', sector: 3, color: 'green', lightColor: 'darkgreen', sectorColor: 'darkgreen', fname: 'موقع رصد :465', area: 'الصجعة', subarea: '', BrandName: '', FacilityStatus: 'مغلق', lic: '465', subunit: '', Fdate: '', action: 'مناسب'});
         pointsData.push({latitude: 25.309694, longitude: 55.640056, AREA2: '', sector: 3, color: 'green', lightColor: 'darkgreen', sectorColor: 'darkgreen', fname: 'موقع رصد :466', area: 'الصجعة', subarea: '', BrandName: '', FacilityStatus: 'مغلق', lic: '466', subunit: '', Fdate: '', action: 'مناسب'});
         pointsData.push({latitude: 25.312583, longitude: 55.637333, AREA2: '', sector: 3, color: 'green', lightColor: 'darkgreen', sectorColor: 'darkgreen', fname: 'موقع رصد :467', area: 'الصجعة', subarea: '', BrandName: '', FacilityStatus: 'مغلق', lic: '467', subunit: '', Fdate: '', action: 'مناسب'});
-
         function renderPoints(points) {
             allPointsLayer.clearLayers();
             points.forEach(function(point) {
@@ -753,6 +642,8 @@ function sendEmail() {
             totalsHtml += '<li>القطاع 4: ' + (sectorCounts['4'] || 0) + '</li>';
             totalsHtml += '<li>القطاع 5: ' + (sectorCounts['5'] || 0) + '</li>';
             totalsHtml += '<li>القطاع 6: ' + (sectorCounts['6'] || 0) + '</li>';
+            totalsHtml += '<li>خارج الصجعة 7: ' + (sectorCounts['7'] || 0) + '</li>';
+            totalsHtml += '<li>جنوب الصجعة 8: ' + (sectorCounts['8'] || 0) + '</li>';
             totalsHtml += '</ul><h5>الإجراءات:</h5><ul>';
             totalsHtml += '<li>انذار: ' + (actionCounts['انذار'] || 0) + '</li>';
             totalsHtml += '<li>مخالفة: ' + (actionCounts['مخالفة'] || 0) + '</li>';
@@ -766,101 +657,5 @@ function sendEmail() {
         }
         renderPoints(pointsData);
     </script>
-
-// تشغيل صوت عند وجود تنبيه
-<script>
-// تشغيل صوت عند وجود تنبيه
-var alertAudio = new Audio('https://www.soundjay.com/button/beep-07.wav');
-
-// طلب إذن الإشعارات
-if ("Notification" in window && Notification.permission !== "granted") {
-    Notification.requestPermission();
-}
-
-// دالة لحساب المسافة بين نقطتين
-function getDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371e3; // نصف قطر الأرض بالمتر
-    const φ1 = lat1 * Math.PI / 180;
-    const φ2 = lat2 * Math.PI / 180;
-    const Δφ = (lat2 - lat1) * Math.PI / 180;
-    const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-              Math.cos(φ1) * Math.cos(φ2) *
-              Math.sin(Δλ/2) * Math.sin(Δλ/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c; // المسافة بالأمتار
-}
-
-// دالة لحساب الزمن بناءً على الوضع المختار
-function getDrivingTimeInMinutes(distanceMeters) {
-    const mode = document.getElementById("mode").value;
-    let speedMetersPerMinute;
-
-    if (mode === 'car') {
-        const now = new Date();
-        const hour = now.getHours();
-        const minute = now.getMinutes();
-        const currentTimeInMinutes = hour * 60 + minute;
-
-        const isRushHour =
-            (currentTimeInMinutes >= 7 * 60 && currentTimeInMinutes <= 10 * 60) || // 7:00 - 10:00
-            (currentTimeInMinutes >= 14.5 * 60 && currentTimeInMinutes <= 22 * 60); // 14:30 - 22:00
-
-        if (isRushHour) {
-            speedMetersPerMinute = 166.67; // زحمة = 10 كم/ساعة
-        } else {
-            speedMetersPerMinute = 500; // عادي = 20 كم/ساعة
-        }
-    } else {
-        speedMetersPerMinute = 83.33; // مشي = 5 كم/ساعة
-    }
-
-    return distanceMeters / speedMetersPerMinute;
-}
-
-
-// تخزين النقاط التي تم الإشعار عنها
-let notified = new Set();
-
-// دالة لفحص النقاط القريبة
-function checkNearbyWarnings() {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(pos => {
-        const userLat = pos.coords.latitude;
-        const userLon = pos.coords.longitude;
-
-        pointsData.forEach(point => {
-            if (point.action === 'انذار') {
-                const distance = getDistance(userLat, userLon, point.latitude, point.longitude);
-                const time = getDrivingTimeInMinutes(distance);
-                if (time <= 5 && !notified.has(point.fname)) {
-                    const msg = `
-📍 الاسم: ${point.fname}
-📍 المنطقة: ${point.area}
-📄 الرخصة: ${point.lic}
-🏢 القطاع: ${point.sector}
-📅 آخر زيارة: ${point.Fdate}
-⏳ الزمن المتوقع للوصول: ${Math.round(time)} دقيقة
-                    `;
-                    alertAudio.play();
-                    const confirmReview = confirm(msg + "هل ترغب بالمراجعة الآن؟");
-                    if (confirmReview) {
-                        window.open(`https://www.openstreetmap.org/?mlat=${point.latitude}&mlon=${point.longitude}#map=15/${point.latitude}/${point.longitude}`, '_blank');
-                    }
-                    notified.add(point.fname);
-                }
-            }
-        });
-    });
-}
-
-// التحقق التلقائي كل 30 ثانية
-setInterval(checkNearbyWarnings, 30000);
-
-// عند تغيير وضع المشي/السيارة يتم الفحص مباشرة
-document.getElementById("mode").addEventListener("change", () => {
-    notified.clear();
-    checkNearbyWarnings();
-});
-</script>
+</body>
+</html>
