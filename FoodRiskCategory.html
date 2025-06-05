@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>استمارة تقييم فئة الخطورة | Sharjah Food Risk Assessment</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&family=Open+Sans:wght@400;700&display=swap');
+    
+    body {
+      font-family: 'Cairo', sans-serif;
+      background: linear-gradient(to right, #e8f5e9, #c8e6c9);
+      margin: 0;
+      padding: 0;
+      color: #1b5e20;
+    }
+
+    .page-top-custom-header {
+        padding: 10px 15px;
+        position: relative; 
+        min-height: 60px; 
+        border-bottom: 1px solid #e0e0e0;
+        margin-bottom: 15px;
+        background-color: #fdfdfd; 
+    }
+    .logo-and-text-container {
+        position: absolute;
+        left: 15px; 
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        align-items: center;
+        direction: ltr; 
+    }
+    .custom-header-logo {
+        height: 45px; 
+        width: auto;
+        margin-right: 8px; 
+    }
+    .custom-header-text {
+        font-size: 9px; 
+        line-height: 1.2;
+        color: #333;
+    }
+    .custom-header-text p {
+        margin: 0;
+        text-align: left; 
+    }
+    
+    .container {
+      max-width: 1000px;
+      margin: 10px auto;
+      background: #fff;
+      padding: 20px; 
+      box-shadow: 0 0 12px rgba(0, 0, 0, 0.1);
+      border-radius: 8px;
+    }
+    
+    h2.form-main-title {
+      text-align: center;
+      color: #1b5e20;
+      margin-top: 0;
+      margin-bottom: 15px; 
+      position: relative;
+      font-size: 20px; 
+    }
+    h2.form-main-title .english-main { display: none; }
+    
+    h2.form-main-title:after {
+      content: "";
+      display: block;
+      width: 80px; 
+      height: 2px; 
+      background: #000000; /* Black color for underline */
+      margin: 6px auto; 
+    }
+    
+    label {
+      display: block;
+      margin: 6px 0 1px; 
+      font-weight: bold;
+      color: #1b5e20;
+      font-size: 14px; 
+    }
+    
+    .info .bilingual { margin-bottom: 0px; } 
+
+    .info input, input[type="date"] {
+      width: 100%;
+      padding: 7px; 
+      margin: 1px 0 8px; 
+      border-radius: 4px;
+      border: 1px solid #a5d6a7;
+      font-family: 'Cairo', sans-serif;
+      box-sizing: border-box;
+      font-size: 13px; 
+    }
+    input[type="date"] { color-scheme: light; }
+    
+    .section {
+      margin-bottom: 12px; 
+      border-bottom: 1px dashed #a5d6a7;
+      padding-bottom: 8px; 
+    }
+    .section:last-of-type { border-bottom: none; }
+    
+    .options label, .checkboxes label {
+      display: flex;
+      align-items: center;
+      margin: 3px 0; 
+      font-weight: normal;
+      font-size: 13px; 
+      justify-content: flex-start;
+    }
+    
+    .options input[type="radio"], .checkboxes input[type="checkbox"], .checkboxes input[type="radio"] {
+      margin-left: 0;
+      margin-right: 7px; 
+    }
+    
+    .result-box {
+      margin-top: 15px; 
+      padding: 12px; 
+      background-color: #e8f5e9;
+      border: 2px solid #2e7d32;
+      border-radius: 6px;
+      font-size: 16px; 
+      font-weight: bold;
+      color: #1b5e20;
+      text-align: center;
+    }
+    .result-box .english { display: none; }
+    
+    .btn {
+      display: inline-block;
+      margin: 15px 4px 0; 
+      padding: 9px 13px; 
+      background-color: #2e7d32;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 18px; 
+      font-family: 'Cairo', sans-serif;
+      transition: all 0.3s;
+      line-height: 1;
+    }
+    
+    .btn:hover {
+      background-color: #1b5e20;
+      transform: translateY(-1px); 
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    @media print {
+      body * { visibility: hidden; }
+      .print-container, .print-container * { visibility: visible; }
+      .print-container { position: absolute; left: 0; top: 0; width: 100%; padding: 20px; background: white; }
+      .no-print, .page-top-custom-header { display: none; } 
+    }
+    
+    .bilingual > .english, .options .english, .checkboxes .english { display: none !important; }
+    .bilingual > .arabic { flex-basis: 100%; padding-left: 0; border-right: none; }
+    .bilingual > label.arabic { width: 100%; text-align: right; }
+    .options .arabic, .checkboxes .arabic { margin-right: 5px; }
+    
+    @media (max-width: 768px) {
+      .container { padding: 15px; margin: 5px auto; }
+      .page-top-custom-header {
+        min-height: 55px; 
+        padding: 5px 10px;
+        margin-bottom:10px;
+      }
+      .logo-and-text-container {
+        left: 10px; 
+      }
+      .custom-header-logo { height: 35px; margin-right: 6px;}
+      .custom-header-text { font-size: 8px; line-height: 1.2;}
+      
+      h2.form-main-title { font-size: 18px; margin-bottom: 10px;}
+      h2.form-main-title:after { width: 70px; height:2px; margin: 5px auto;}
+      label { font-size: 13px; margin: 4px 0 1px;}
+      .info input, input[type="date"] { font-size: 12px; padding:6px; margin-bottom:6px; }
+      .options label, .checkboxes label { font-size: 12px; margin: 2px 0;}
+      .result-box { font-size: 14px; padding: 10px;}
+      .btn { font-size: 16px; padding: 7px 10px; margin-top: 10px;}
+    }
+  </style>
+</head>
+<body>
+  <div class="page-top-custom-header">
+    <div class="logo-and-text-container">
+        <img src='https://zmohd1987.github.io/map1/ShjLogo.png' alt='شعار بلدية مدينة الشارقة' class="custom-header-logo">
+        <div class="custom-header-text">
+            <p>بلدية مدينة الشارقة</p>
+            <p>قسم الرقابة الغذائية</p>
+        </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <h2 class="form-main-title"><span class="arabic-main">استمارة تقييم فئة الخطورة للمنشآت الغذائية</span><br><span class="english-main">Food Establishment Risk Assessment Form</span></h2>
+    
+    <div class="info">
+      <div class="bilingual"><label class="arabic">اسم المنشأة:</label></div>
+      <input type="text" id="facilityName">
+      
+      <div class="bilingual"><label class="arabic">رقم الرخصة:</label></div>
+      <input type="text" id="licenseNumber">
+      
+      <div class="bilingual"><label class="arabic">العنوان:</label></div>
+      <input type="text" id="address">
+      
+      <div class="bilingual"><label class="arabic">النشاط:</label></div>
+      <input type="text" id="activity">
+      
+      <div class="bilingual"><label class="arabic">الشخص المسؤول:</label></div>
+      <input type="text" id="responsiblePerson">
+      
+      <div class="bilingual"><label class="arabic">الهاتف:</label></div>
+      <input type="text" id="phone">
+
+      <div class="bilingual"><label class="arabic">تاريخ التقييم:</label></div>
+      <input type="date" id="assessmentDate">
+    </div>
+
+    <form id="riskForm">
+      <div class="section">
+        <div class="bilingual"> <label class="arabic">1) نوع الغذاء المتداول / المحضر / المصنع</label> </div>
+        <div class="options">
+          <label><input type="radio" name="q1" value="20"> <span class="arabic">أ. أغذية عالية الخطورة جاهزة للأكل (20)</span><span class="english">a. High-risk ready-to-eat foods (20)</span></label>
+          <label><input type="radio" name="q1" value="10"> <span class="arabic">ب. أغذية متوسطة الخطورة غير جاهزة للأكل (10)</span><span class="english">b. Medium-risk non-ready-to-eat foods (10)</span></label>
+          <label><input type="radio" name="q1" value="5"> <span class="arabic">ج. أغذية منخفضة الخطورة (5)</span><span class="english">c. Low-risk foods (5)</span></label>
+        </div>
+      </div>
+      <div class="section">
+        <div class="bilingual"> <label class="arabic">2) عمليات التداول / التحضير / التصنيع</label> </div>
+        <div class="options">
+          <label><input type="radio" name="q2" value="30"> <span class="arabic">أ. تداول/ تحضير كبير لأغذية عالية الخطورة (30)</span><span class="english">a. Extensive handling of high-risk foods (30)</span></label>
+          <label><input type="radio" name="q2" value="25"> <span class="arabic">ب. تداول/ تحضير محدود لأغذية عالية الخطورة (25)</span><span class="english">b. Limited handling of high-risk foods (25)</span></label>
+          <label><input type="radio" name="q2" value="20"> <span class="arabic">ج. تداول لأغذية متنوعة عند نقطة البيع (20)</span><span class="english">c. Handling of various foods at point of sale (20)</span></label>
+          <label><input type="radio" name="q2" value="15"> <span class="arabic">د. تداول لأغذية منخفضة الخطورة (15)</span><span class="english">d. Handling of low-risk foods (15)</span></label>
+          <label><input type="radio" name="q2" value="10"> <span class="arabic">هـ. تخزين/ توزيع/ بيع لأغذية منخفضة الخطورة معبأة (10)</span><span class="english">e. Storage/distribution/sale of packaged low-risk foods (10)</span></label>
+        </div>
+      </div>
+      <div class="section">
+        <div class="bilingual"> <label class="arabic">3) التجهيزات والمرافق</label> </div>
+        <div class="options">
+          <label><input type="radio" name="q3" value="10"> <span class="arabic">أ. التجهيزات غير مناسبة أو المساحة غير كافية (10)</span><span class="english">a. Inadequate equipment or insufficient space (10)</span></label>
+          <label><input type="radio" name="q3" value="0"> <span class="arabic">ب. التجهيزات والمرافق مناسبة (0)</span><span class="english">b. Suitable equipment and facilities (0)</span></label>
+        </div>
+      </div>
+      <div class="section">
+        <div class="bilingual"> <label class="arabic">4) أعداد المستهلكين</label> </div>
+        <div class="options">
+          <label><input type="radio" name="q4" value="10"> <span class="arabic">أ. تقدم أكثر من 500 وجبة يومياً (10)</span><span class="english">a. Serves more than 500 meals daily (10)</span></label>
+          <label><input type="radio" name="q4" value="5"> <span class="arabic">ب. بين 100 إلى 500 وجبة (5)</span><span class="english">b. Between 100 to 500 meals (5)</span></label>
+          <label><input type="radio" name="q4" value="0"> <span class="arabic">ج. أقل من 100 وجبة (0)</span><span class="english">c. Less than 100 meals (0)</span></label>
+        </div>
+      </div>
+      <div class="section">
+        <div class="bilingual"> <label class="arabic">5) فئات المستهلكين</label> </div>
+        <div class="options">
+          <label><input type="radio" name="q5" value="10"> <span class="arabic">أ. المنشأة تخدم فئات حساسة (10)</span><span class="english">a. Establishment serves sensitive groups (10)</span></label>
+          <label><input type="radio" name="q5" value="0"> <span class="arabic">ب. لا تخدم فئات حساسة (0)</span><span class="english">b. Does not serve sensitive groups (0)</span></label>
+        </div>
+      </div>
+      <div class="section">
+        <div class="bilingual"> <label class="arabic">6) الالتزام بالأنظمة والتعليمات</label> </div>
+        <div class="options">
+          <label><input type="radio" name="q6" value="20"> <span class="arabic">أ. غير ملتزمة (20)</span><span class="english">a. Non-compliant (20)</span></label>
+          <label><input type="radio" name="q6" value="10"> <span class="arabic">ب. تلتزم غالباً ويوجد مخالفات بسيطة (10)</span><span class="english">b. Mostly compliant with minor violations (10)</span></label>
+          <label><input type="radio" name="q6" value="0"> <span class="arabic">ج. ملتزمة تماماً ولا يوجد مخالفات (0)</span><span class="english">c. Fully compliant with no violations (0)</span></label>
+        </div>
+      </div>
+      <div class="section">
+        <div class="bilingual"> <label class="arabic">نظام سلامة الأغذية المطبق:</label> </div>
+        <div class="checkboxes">
+          <label><input type="checkbox" id="haccp" value="HACCP"> <span class="arabic">نظام الهاسب</span><span class="english">HACCP System</span></label>
+          <label><input type="checkbox" id="ghp" value="GHP"> <span class="arabic">ممارسات النظافة الجيدة</span><span class="english">Good Hygiene Practices (GHP)</span></label>
+          <label><input type="radio" name="systemApplied" value="نعم" id="systemYes"> <span class="arabic">المنشأة تطبق نظام سلامة</span><span class="english">Establishment applies a safety system</span></label>
+          <label><input type="radio" name="systemApplied" value="لا" id="systemNo"> <span class="arabic">المنشأة لا تطبق نظام سلامة</span><span class="english">Establishment does not apply a safety system</span></label>
+        </div>
+      </div>
+
+      <div class="result-box" id="result">
+        <div class="arabic">المجموع: 0 | الفئة: -</div>
+        <div class="english">Total: 0 | Category: -</div>
+      </div>
+      
+      <div style="text-align: center;">
+        <button type="button" class="btn" onclick="printReport()" title="طباعة التقرير">🖨️</button>
+        <button type="button" class="btn" onclick="sendWhatsApp()" title="إرسال عبر واتساب">📱</button>
+        <button type="button" class="btn" onclick="sendEmail()" title="إرسال عبر البريد الإلكتروني">📧</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', (event) => {
+        const today = new Date();
+        const assessmentDateField = document.getElementById('assessmentDate');
+        if (assessmentDateField) {
+            const year = today.getFullYear();
+            const month = String(today.getMonth() + 1).padStart(2, '0'); 
+            const day = String(today.getDate()).padStart(2, '0');
+            assessmentDateField.value = `${year}-${month}-${day}`;
+        }
+        calculateRisk();
+    });
+
+    const form = document.getElementById('riskForm');
+    const resultBox = document.getElementById('result');
+    const assessmentDateFieldListener = document.getElementById('assessmentDate');
+
+    if (form) form.addEventListener('change', calculateRisk);
+    if (assessmentDateFieldListener) assessmentDateFieldListener.addEventListener('change', calculateRisk);
+
+    function calculateRisk() {
+      let total = 0;
+      for (let i = 1; i <= 6; i++) {
+        const selected = document.querySelector(`input[name="q${i}"]:checked`);
+        if (selected) { total += parseInt(selected.value); }
+      }
+      let categoryAr = '-'; let categoryEn = '-'; 
+      if (total > 75) { categoryAr = 'عالية جداً'; categoryEn = 'Very High'; }
+      else if (total > 55) { categoryAr = 'عالية'; categoryEn = 'High'; }
+      else if (total > 45) { categoryAr = 'متوسطة'; categoryEn = 'Medium'; }
+      else if (total > 25) { categoryAr = 'منخفضة'; categoryEn = 'Low'; }
+      else if (total >= 0) { categoryAr = 'منخفضة جداً'; categoryEn = 'Very Low'; }
+      resultBox.innerHTML = `<div class="arabic">المجموع: ${total} | الفئة: ${categoryAr}</div><div class="english">Total: ${total} | Category: ${categoryEn}</div>`;
+    }
+
+    function getSelectedRadioText(questionNumber) {
+      const selected = document.querySelector(`input[name="q${questionNumber}"]:checked`);
+      const parentLabel = selected ? selected.parentElement : null;
+      const arabicSpan = parentLabel ? parentLabel.querySelector('.arabic') : null;
+      const englishSpan = parentLabel ? parentLabel.querySelector('.english') : null;
+      return { 
+          arabic: arabicSpan ? arabicSpan.textContent.trim() : 'لم يتم الاختيار',
+          english: englishSpan ? englishSpan.textContent.trim() : 'Not selected'
+      };
+    }
+    
+    function getQuestionTitle(questionNumber) {
+        const labelElement = document.querySelector(`#riskForm > .section:nth-of-type(${questionNumber}) .bilingual label.arabic`);
+        return labelElement ? labelElement.textContent.trim() : `السؤال ${questionNumber}`;
+    }
+
+    function getSafetySystems() {
+      let systemsAr = [], systemsEn = []; 
+      const haccpCheckbox = document.getElementById('haccp');
+      const ghpCheckbox = document.getElementById('ghp');
+
+      if (haccpCheckbox.checked && haccpCheckbox.parentElement) {
+        if(haccpCheckbox.parentElement.querySelector('.arabic')) systemsAr.push(haccpCheckbox.parentElement.querySelector('.arabic').textContent.trim());
+        if(haccpCheckbox.parentElement.querySelector('.english')) systemsEn.push(haccpCheckbox.parentElement.querySelector('.english').textContent.trim());
+      }
+      if (ghpCheckbox.checked && ghpCheckbox.parentElement) {
+         if(ghpCheckbox.parentElement.querySelector('.arabic')) systemsAr.push(ghpCheckbox.parentElement.querySelector('.arabic').textContent.trim());
+         if(ghpCheckbox.parentElement.querySelector('.english')) systemsEn.push(ghpCheckbox.parentElement.querySelector('.english').textContent.trim());
+      }
+      const systemApplied = document.querySelector('input[name="systemApplied"]:checked');
+      if (systemApplied && systemApplied.parentElement) {
+        if(systemApplied.parentElement.querySelector('.arabic')) systemsAr.push(systemApplied.parentElement.querySelector('.arabic').textContent.trim());
+        if(systemApplied.parentElement.querySelector('.english')) systemsEn.push(systemApplied.parentElement.querySelector('.english').textContent.trim());
+      }
+      return {
+        arabic: systemsAr.length > 0 ? systemsAr.join('، ') : 'لم يتم تحديد نظام سلامة مطبق',
+        english: systemsEn.length > 0 ? systemsEn.join(', ') : 'No safety system specified' 
+      };
+    }
+
+    function generateReportText() { 
+      const facilityName = document.getElementById('facilityName').value || 'غير مدخل';
+      const licenseNumber = document.getElementById('licenseNumber').value || 'غير مدخل';
+      const address = document.getElementById('address').value || 'غير مدخل';
+      const activity = document.getElementById('activity').value || 'غير مدخل';
+      const responsiblePerson = document.getElementById('responsiblePerson').value || 'غير مدخل';
+      const phone = document.getElementById('phone').value || 'غير مدخل';
+      let assessmentDateValue = document.getElementById('assessmentDate').value;
+      let formattedAssessmentDateAr = 'غير محدد';
+      let formattedAssessmentDateEn = 'Not specified'; 
+      if (assessmentDateValue) {
+          try {
+            const dateParts = assessmentDateValue.split('-');
+            const dateObj = new Date(Date.UTC(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2])));
+            const options = { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'Asia/Dubai' }; 
+            formattedAssessmentDateAr = new Intl.DateTimeFormat('ar-AE-u-nu-latn', options).format(dateObj);
+            formattedAssessmentDateEn = new Intl.DateTimeFormat('en-GB', options).format(dateObj);
+          } catch(e){ console.error("Error formatting assessment date for HTML report:", e); }
+      }
+      
+      const q_full = Array.from({length: 6}, (_, i) => getSelectedRadioText(i + 1));
+      const qTitles = Array.from({length: 6}, (_, i) => getQuestionTitle(i + 1));
+      const safetySystemsReport = getSafetySystems(); 
+
+      let totalScore = "0", categoryAr = '-', categoryEn = '-';
+      const resultArabicDiv = resultBox.querySelector('.arabic');
+      if (resultArabicDiv) { const partsAr = resultArabicDiv.textContent.split('|'); if(partsAr.length === 2) {totalScore = partsAr[0].replace('المجموع:', '').trim(); categoryAr = partsAr[1].replace('الفئة:', '').trim();} }
+      const resultEnglishDiv = resultBox.querySelector('.english'); 
+      if (resultEnglishDiv) { const partsEn = resultEnglishDiv.textContent.split('|'); if(partsEn.length === 2) {categoryEn = partsEn[1].replace('Category:', '').trim();} }
+
+      const reportHTML = `
+        <!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>تقرير تقييم فئة الخطورة | Risk Assessment Report</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&family=Open+Sans:wght@400;700&display=swap');
+            body { font-family: 'Cairo', 'Open Sans', sans-serif; line-height: 1.6; padding: 20px; color: #1b5e20; background-color: #fafffa; }
+            .report-header { text-align: center; margin-bottom: 20px; } .report-logo { height: 60px; margin-bottom: 8px; }
+            .report-header-title { color: #1b5e20; margin: 0; font-size: 18px; font-family: 'Cairo', sans-serif; }
+            .report-header-subtitle { color: #2e7d32; margin: 4px 0 12px; font-size: 14px; font-family: 'Cairo', sans-serif; }
+            .report-main-title { text-align: center; color: #1b5e20; margin: 15px 0; font-size: 16px; font-family: 'Cairo', sans-serif; font-weight: bold; }
+            table.report-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 11px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+            .report-table th, .report-table td { border: 1px solid #66bb6a; padding: 7px; vertical-align: top; }
+            .report-table th { background-color: #a5d6a7; color: #145a32; font-weight: bold; font-family: 'Cairo', sans-serif; }
+            .arabic-col { text-align: right; direction: rtl; font-family: 'Cairo', sans-serif; width: 45%; }
+            .assessment-col { text-align: center; font-family: 'Cairo', sans-serif; width: 30%; font-weight: bold; color: #2e7d32; }
+            .english-col { text-align: left; direction: ltr; font-family: 'Open Sans', sans-serif; width: 25%; }
+            .section-title-row td { background-color: #c8e6c9 !important; color: #1b5e20; font-weight: bold; font-size: 13px; text-align: center;}
+            .info-label { font-weight: bold; } .result-table { margin-top: 20px; width: 100%; }
+            .result-table td { padding: 10px; font-size: 14px; font-weight: bold; }
+            .result-label-ar { text-align: right; background-color: #e8f5e9; color: #1b5e20; }
+            .result-value { text-align: center; background-color: #e8f5e9; color: #1b5e20; font-size:16px; } 
+            .result-label-en { text-align: left; background-color: #e8f5e9; color: #1b5e20; }
+            @media print { body { padding: 0; color: #000; background-color: #fff;} .no-print { display: none; } .report-table th, .report-table td { border: 1px solid #888; } .report-table th { background-color: #e0e0e0; color: #000;} .section-title-row td { background-color: #f0f0f0 !important; color: #000;} .result-table td { background-color: #f0f0f0; color: #000; } }
+            .button-container { text-align: center; margin-top: 20px; } .print-btn, .close-btn { padding: 10px 20px; background: #2e7d32; color: white; border: none; border-radius: 5px; cursor: pointer; margin: 0 10px; font-family: 'Cairo', sans-serif;}
+            .print-btn:hover, .close-btn:hover { background: #1b5e20; }
+        </style></head><body>
+        <div class="report-header"><img src="https://zmohd1987.github.io/map1/ShjLogo.png" alt="Sharjah Municipality Logo" class="report-logo">
+            <div class="report-header-title">بلدية مدينة الشارقة</div><div class="report-header-subtitle">قسم الرقابة الغذائية</div></div>
+        <div class="report-main-title">تقرير تقييم فئة الخطورة للمنشآت الغذائية</div>
+        <table class="report-table"><thead><tr><th class="arabic-col">البيان (عربي)</th><th class="assessment-col">التقييم / الاختيار</th><th class="english-col">Statement (English)</th></tr></thead><tbody>
+            <tr class="section-title-row"><td colspan="3">معلومات المنشأة</td></tr>
+            <tr><td class="arabic-col"><span class="info-label">اسم المنشأة:</span> ${facilityName}</td><td class="assessment-col">${facilityName}</td><td class="english-col"><span class="info-label">Establishment Name:</span> ${facilityName}</td></tr>
+            <tr><td class="arabic-col"><span class="info-label">رقم الرخصة:</span> ${licenseNumber}</td><td class="assessment-col">${licenseNumber}</td><td class="english-col"><span class="info-label">License Number:</span> ${licenseNumber}</td></tr>
+            <tr><td class="arabic-col"><span class="info-label">العنوان:</span> ${address}</td><td class="assessment-col">${address}</td><td class="english-col"><span class="info-label">Address:</span> ${address}</td></tr>
+            <tr><td class="arabic-col"><span class="info-label">النشاط:</span> ${activity}</td><td class="assessment-col">${activity}</td><td class="english-col"><span class="info-label">Activity:</span> ${activity}</td></tr>
+            <tr><td class="arabic-col"><span class="info-label">الشخص المسؤول:</span> ${responsiblePerson}</td><td class="assessment-col">${responsiblePerson}</td><td class="english-col"><span class="info-label">Responsible Person:</span> ${responsiblePerson}</td></tr>
+            <tr><td class="arabic-col"><span class="info-label">الهاتف:</span> ${phone}</td><td class="assessment-col">${phone}</td><td class="english-col"><span class="info-label">Phone:</span> ${phone}</td></tr>
+            <tr><td class="arabic-col"><span class="info-label">تاريخ التقييم:</span> ${formattedAssessmentDateAr}</td><td class="assessment-col">${formattedAssessmentDateAr}</td><td class="english-col"><span class="info-label">Assessment Date:</span> ${formattedAssessmentDateEn}</td></tr>
+            <tr class="section-title-row"><td colspan="3">نتائج التقييم</td></tr>
+            ${q_full.map((ans, i) => `<tr><td class="arabic-col">${qTitles[i]}</td><td class="assessment-col">${ans.arabic}</td><td class="english-col">${ans.english}</td></tr>`).join('')}
+            <tr class="section-title-row"><td colspan="3">نظام سلامة الأغذية المطبق</td></tr>
+            <tr><td class="arabic-col">${safetySystemsReport.arabic}</td><td class="assessment-col">${safetySystemsReport.arabic}</td><td class="english-col">${safetySystemsReport.english}</td></tr>
+        </tbody></table>
+        <table class="report-table result-table"><tr class="section-title-row"><td colspan="3">النتيجة النهائية</td></tr>
+            <tr><td class="result-label-ar">المجموع: ${totalScore} | الفئة: ${categoryAr}</td><td class="result-value">${totalScore}</td><td class="result-label-en">Total: ${totalScore} | Category: ${categoryEn}</td></tr>
+        </table>
+        <div class="no-print button-container"><button onclick="window.print()" class="print-btn">طباعة</button><button onclick="window.close()" class="close-btn">إغلاق</button></div>
+        </body></html>`;
+      return reportHTML;
+    }
+
+    function generateReportPlainText() {
+        let report = `بلدية مدينة الشارقة\nقسم الرقابة الغذائية\nتقرير تقييم فئة الخطورة للمنشآت الغذائية\n------------------------------------\n`;
+        report += `معلومات المنشأة:\n`;
+        report += `اسم المنشأة: ${document.getElementById('facilityName').value || 'غير مدخل'}\n`;
+        report += `رقم الرخصة: ${document.getElementById('licenseNumber').value || 'غير مدخل'}\n`;
+        report += `العنوان: ${document.getElementById('address').value || 'غير مدخل'}\n`;
+        report += `النشاط: ${document.getElementById('activity').value || 'غير مدخل'}\n`;
+        report += `الشخص المسؤول: ${document.getElementById('responsiblePerson').value || 'غير مدخل'}\n`;
+        report += `الهاتف: ${document.getElementById('phone').value || 'غير مدخل'}\n`;
+        let assessmentDateValuePlain = document.getElementById('assessmentDate').value;
+        let formattedAssessmentDateArPlain = 'غير محدد';
+        if (assessmentDateValuePlain) {
+             try { 
+                const dateParts = assessmentDateValuePlain.split('-');
+                const dateObj = new Date(Date.UTC(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2])));
+                formattedAssessmentDateArPlain = new Intl.DateTimeFormat('ar-AE-u-nu-latn', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Dubai' }).format(dateObj);
+             } catch(e) {}
+        }
+        report += `تاريخ التقييم: ${formattedAssessmentDateArPlain}\n------------------------------------\nنتائج التقييم:\n`;
+        for (let i = 1; i <= 6; i++) { 
+            const questionData = getSelectedRadioText(i); 
+            report += `${getQuestionTitle(i)}: ${questionData.arabic}\n`; 
+        }
+        report += `------------------------------------\nنظام سلامة الأغذية المطبق:\n${getSafetySystems().arabic}\n------------------------------------\n`;
+        const resultArabicDiv = resultBox.querySelector('.arabic');
+        let totalScoreText = 'المجموع: 0', categoryArText = 'الفئة: -';
+        if (resultArabicDiv && resultArabicDiv.textContent.includes('المجموع:')) { const partsAr = resultArabicDiv.textContent.split('|'); totalScoreText = partsAr[0].trim(); categoryArText = partsAr[1].trim(); }
+        report += `النتيجة النهائية:\n${totalScoreText}\n${categoryArText}\n------------------------------------\n`;
+        return report;
+    }
+
+    function printReport() {
+      const reportHTML = generateReportText();
+      const printWindow = window.open('', '_blank');
+      printWindow.document.write(reportHTML);
+      printWindow.document.close();
+    }
+
+    function sendWhatsApp() {
+        const plainTextReport = generateReportPlainText();
+        const encodedMessage = encodeURIComponent(plainTextReport);
+        const whatsappURL = `https://wa.me/?text=${encodedMessage}`;
+        window.open(whatsappURL, '_blank');
+    }
+function sendEmail() {
+    const facilityName = document.getElementById('facilityName')?.value || "منشأة غير محددة";
+    const plainTextReportForEmail = generateReportPlainText();
+    const subject = `تقرير تقييم فئة الخطورة الغذائية - ${facilityName}`;
+    const body = plainTextReportForEmail;
+    const mailtoURL = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+    // فتح تطبيق البريد المثبت (مثل أوتلوك)
+    const newWindow = window.open(mailtoURL, '_blank');
+
+    if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+        window.location.href = mailtoURL;
+    }
+}
+  </script>
+</body>
+</html>
