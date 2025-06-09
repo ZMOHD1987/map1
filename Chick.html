@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Establishment Entry Table with MAIN SubNo=0</title>
+<style>
+  body { font-family: Arial; padding: 20px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+  th, td { border: 1px solid #aaa; padding: 8px; text-align: center; }
+  input[readonly] { background-color: #e0f7e9; }
+  input, select { width: 100%; box-sizing: border-box; }
+  .error { color: red; font-size: 13px; }
+  button { padding: 8px 16px; margin: 10px 5px 0 0; cursor: pointer; }
+  #report { margin-top: 30px; border-top: 2px solid #000; padding-top: 15px; }
+  .count { font-weight: bold; margin-top: 10px; }
+  tr.duplicate { background-color: #ffe6e6; }
+</style>
+</head>
+<body>
+
+<h2>Establishment Entry Table</h2>
+<table id="entryTable">
+  <thead>
+    <tr>
+      <th>License No.</th>
+      <th>Emirate</th>
+      <th>Type</th>
+      <th>Sub No.</th>
+      <th>Unique ID</th>
+      <th>Validation</th>
+      <th>Status</th>
+      <th>Delete</th>
+    </tr>
+  </thead>
+  <tbody id="entryBody"></tbody>
+</table>
+
+<button onclick="addRow()">➕ Add Row</button>
+<button onclick="generateReport()">📄 Show Report (Not Canceled)</button>
+<div id="report"></div>
+
+<script>
+  let existingIDs = new Set();
+
+  function getNextSubNumber(license, emirate, type) {
+    if (type === "MAIN") return 0;
+
+    let maxSub = 0;
+    const rows = document.querySelectorAll("#entryBody tr");
+    rows.forEach(row => {
+      const l = row.cells[0].querySelector("input").value.trim();
+      const e = row.cells[1].querySelector("select").value;
+      const t = row.cells[2].querySelector("select").value;
+      const s = parseInt(row.cells[3].querySelector("input").value);
+
+      if (l === license && e === emirate) {
+        if (t === type && !isNaN(s) && s > maxSub) {
+          maxSub = s;
+        }
+      }
+    });
+    return maxSub + 1;
+  }
+
+  function addRow() {
+    const tbody = document.getElementById("entryBody");
+    const row = tbody.insertRow();
+
+    const licenseCell = row.insertCell();
+    const emirateCell = row.insertCell();
+    const typeCell = row.insertCell();
+    const subCell = row.insertCell();
+    const idCell = row.insertCell();
+    const statusCell = row.insertCell();
+    const validationCell = row.insertCell();
+    const deleteCell = row.insertCell();
+
+    const licenseInput = document.createElement("input");
+    const emirateSelect = document.createElement("select");
+    emirateSelect.innerHTML = `<option value="SHJ">SHJ</option><option value="DXB">DXB</option><option value="AUH">AUH</option>`;
+
+    const typeSelect = document.createElement("select");
+    typeSelect.innerHTML = `<option value="MAIN">MAIN</option><option value="KSK">KSK</option><option value="WHS">WHS</option>`;
+
+    const subInput = document.createElement("input");
+    subInput.type = "number";
+    subInput.readOnly = true;
+
+    const uidInput = document.createElement("input");
+    uidInput.readOnly = true;
+    uidInput.style.backgroundColor = "#d1f0ff";
+
+    const statusSelect = document.createElement("select");
+    statusSelect.innerHTML = `<option value="Active">Active</option><option value="Inactive">Inactive</option><option value="Canceled">Canceled</option>`;
+
+    const validationDiv = document.createElement("div");
+    validationDiv.className = "error";
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.textContent = "❌";
+    deleteBtn.onclick = () => deleteRow(deleteBtn);
+
+    function updateRow() {
+      const license = licenseInput.value.trim();
+      const emirate = emirateSelect.value;
+      const type = typeSelect.value;
+
+      if (license === "") {
+        subInput.value = "";
+        uidInput.value = "";
+        validationDiv.textContent = "License No. is required.";
+        row.classList.remove("duplicate");
+        return;
+      }
+
+      if (type !== "MAIN") {
+        let mainExists = false;
+        const rows = document.querySelectorAll("#entryBody tr");
+        rows.forEach(r => {
+          const l = r.cells[0].querySelector("input").value.trim();
+          const e = r.cells[1].querySelector("select").value;
+          const t = r.cells[2].querySelector("select").value;
+          if (l === license && e === emirate && t === "MAIN") {
+            mainExists = true;
+          }
+        });
+        if (!mainExists) {
+          validationDiv.textContent = "Main license (MAIN) entry must exist first for this license and emirate.";
+          subInput.value = "";
+          uidInput.value = "";
+          return;
+        } else {
+          validationDiv.textContent = "";
+        }
+      } else {
+        validationDiv.textContent = "";
+      }
+
+      const nextSub = getNextSubNumber(license, emirate, type);
+      subInput.value = nextSub;
+
+      const subFormatted = ("00" + nextSub).slice(-2);
+      const uniqueID = `${license}-${emirate}-${type}-${subFormatted}`;
+      uidInput.value = uniqueID.toUpperCase();
+
+      // التحقق من تكرار UID
+      const duplicate = Array.from(document.querySelectorAll("#entryBody tr")).some(r => {
+        if (r === row) return false;
+        const otherUID = r.cells[4].querySelector("input").value.trim().toUpperCase();
+        return otherUID === uniqueID.toUpperCase();
+      });
+
+      if (duplicate) {
+        validationDiv.textContent = "❗ Unique ID already exists.";
+        row.classList.add("duplicate");
+      } else {
+        row.classList.remove("duplicate");
+        validationDiv.textContent = "";
+      }
+    }
+
+    licenseInput.addEventListener("input", updateRow);
+    emirateSelect.addEventListener("change", updateRow);
+    typeSelect.addEventListener("change", updateRow);
+
+    licenseCell.appendChild(licenseInput);
+    emirateCell.appendChild(emirateSelect);
+    typeCell.appendChild(typeSelect);
+    subCell.appendChild(subInput);
+    idCell.appendChild(uidInput);
+    statusCell.appendChild(statusSelect);
+    validationCell.appendChild(validationDiv);
+    deleteCell.appendChild(deleteBtn);
+  }
+
+  function deleteRow(btn) {
+    const row = btn.closest("tr");
+    row.remove();
+  }
+
+  function generateReport() {
+    const rows = document.querySelectorAll("#entryBody tr");
+    let reportHTML = `<h3>📋 Report - Active / Inactive Establishments</h3><table><tr>
+      <th>#</th><th>License No.</th><th>Emirate</th><th>Type</th><th>Sub No.</th><th>Unique ID</th><th>Status</th>
+    </tr>`;
+    let count = 0;
+    rows.forEach((row, index) => {
+      const status = row.cells[5].querySelector("select").value;
+      if (status !== "Canceled") {
+        const license = row.cells[0].querySelector("input").value;
+        const emirate = row.cells[1].querySelector("select").value;
+        const type = row.cells[2].querySelector("select").value;
+        const sub = row.cells[3].querySelector("input").value;
+        const uid = row.cells[4].querySelector("input").value;
+
+        reportHTML += `<tr>
+          <td>${++count}</td><td>${license}</td><td>${emirate}</td><td>${type}</td>
+          <td>${sub}</td><td>${uid}</td><td>${status}</td>
+        </tr>`;
+      }
+    });
+    reportHTML += `</table><div class="count">Total Active/Inactive: ${count}</div>`;
+    document.getElementById("report").innerHTML = reportHTML;
+  }
+
+  addRow(); // نضيف صف واحد للبدء
+</script>
+
+</body>
+</html>
