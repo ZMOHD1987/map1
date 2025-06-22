@@ -339,7 +339,7 @@ if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQU
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>نظام إدارة التفتيش</title>
+<title>إدخال بيانات الدراسات</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1012,39 +1012,39 @@ if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQU
     </div>
 </div>
 
-<h2><i class="fas fa-clipboard-list"></i> نظام إدارة التفتيش</h2>
+<h2><i class="fas fa-clipboard-list"></i> إدخال بيانات الدراسات</h2>
 
 <div class="card">
   <form id="mainForm" onsubmit="return handleFormSubmission();">
     <table>
       <tr>
         <td>
-          <label for="LicID">رقم الرخصة:</label>
-          <input type="text" id="LicID" placeholder="أدخل رقم الرخصة" required autocomplete="off">
-          <div id="licenseMsg" class="msg-container error-msg" style="display:none;"></div>
-          <div id="licenseInfo" class="msg-container info-msg" style="display:none;"></div>
-        </td>
-        <td>
-          <button type="button" id="addNewFacilityBtn" onclick="openFacilityForm(true)" style="display:none; margin-bottom: 5px;">
-            <i class="fas fa-plus-circle"></i> إضافة منشأة جديدة
-          </button>
-          <button type="button" id="editFacilityBtn" onclick="openFacilityForm(false)" style="display:none;">
-            <i class="fas fa-edit"></i> تعديل بيانات المنشأة
-          </button>
-        </td>
-        <td>
-          <label for="Facilityname">اسم المنشأة:</label>
-          <input type="text" id="Facilityname" placeholder="اسم المنشأة" readonly>
-        </td>
-        <td>
-          <label for="AREA">المنطقة:</label>
-          <input type="text" id="AREA" placeholder="المنطقة" readonly>
-        </td>
-        <td>
-          <label for="Activity">النشاط:</label>
-          <input type="text" id="Activity" placeholder="النشاط" readonly>
-        </td>
-        <td>
+  <label for="LicID">رقم الرخصة:</label>
+  <input type="text" id="LicID" placeholder="أدخل رقم الرخصة" required autocomplete="off">
+  <div id="licenseMsg" class="msg-container error-msg" style="display:none;"></div>
+  <div id="licenseInfo" class="msg-container info-msg" style="display:none;"></div>
+</td>
+<td>
+  <button type="button" id="addNewFacilityBtn" onclick="openFacilityForm(true)" style="display:none; margin-bottom: 5px;">
+    <i class="fas fa-plus-circle"></i> إضافة منشأة جديدة
+  </button>
+  <button type="button" id="editFacilityBtn" onclick="openFacilityForm(false)" style="display:none;">
+    <i class="fas fa-edit"></i> تعديل بيانات المنشأة
+  </button>
+</td>
+
+<td>
+  <label for="Facilityname">اسم المنشأة:</label>
+  <textarea id="Facilityname" placeholder="اسم المنشأة" readonly rows="2" style="resize:none; min-width:180px; min-height:2.5em;"></textarea>
+</td>
+<td>
+  <label for="AREA">المنطقة:</label>
+  <textarea id="AREA" placeholder="المنطقة" readonly rows="2" style="resize:none; min-width:120px; min-height:2.5em;"></textarea>
+</td>
+<td>
+  <label for="Activity">النشاط:</label>
+  <textarea id="Activity" placeholder="النشاط" readonly rows="2" style="resize:none; min-width:120px; min-height:2.5em;"></textarea>
+</td>        <td>
           <label for="SiteCoordinates">الإحداثيات:</label>
           <input type="text" id="SiteCoordinates" placeholder="الإحداثيات" readonly>
         </td>
@@ -1252,7 +1252,7 @@ function fillFormWithRecord(record) {
 // **********************************************
 
 // حدث الإدخال على رقم الرخصة لتعبئة بيانات المنشأة عند الكتابة في حقل رقم الرخصة الرئيسي
-LicIDInput.addEventListener('input', async function() {
+LicIDInput.addEventListener('blur', async function() {
     const lic = this.value.trim();
     
     // مسح حقول المنشأة للقراءة فقط وحقول التفتيش
@@ -2100,6 +2100,3 @@ function exportToExcel() {
 
 </body>
 </html>
-
-
-
