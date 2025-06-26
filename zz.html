@@ -12,19 +12,8 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
 
-        /* Color Palette */
-        :root {
-            --primary-green: #4CAF50; /* A vibrant green */
-            --darker-green: #388E3C; /* Darker shade for hover */
-            --light-beige: #FFFDD0; /* A soft, warm beige */
-            --white: #FFFFFF;
-            --text-dark: #333;
-            --text-light: #fff;
-            --accent-blue: #1a73e8; /* Keeping a blue accent for headings/links */
-        }
-
         html, body { height: 100%; margin: 0; padding: 0; }
-        body { font-family: 'Cairo', sans-serif; background: #f8f9fa; min-height: 100vh !important; font-size: 14px; color: var(--text-dark); }
+        body { font-family: 'Cairo', sans-serif; background: #f8f9fa; min-height: 100vh !important; font-size: 14px; color: #333; }
         #map { height: 100vh; width: 100vw; min-height: 100vh; background-color: #f0f0f0; }
 
         /* Logo Bar */
@@ -35,13 +24,13 @@
             z-index: 1201;
             width: 55px;
             height: 100vh;
-            background: var(--primary-green); /* Green background */
+            background: #ffffff;
             display: flex;
             flex-direction: column;
             align-items: center;
             padding-top: 10px;
             border-radius: 0 15px 15px 0;
-            box-shadow: 2px 0 15px rgba(0,0,0,0.1);
+            box-shadow: 2px 0 15px rgba(0,0,0,0.08);
         }
         #logo-bar img {
             width: 42px;
@@ -49,7 +38,7 @@
             margin-bottom: 15px;
         }
         #logo-bar .logo-caption {
-            font-size: 12px; font-weight: bold; color: var(--text-light); /* White text */
+            font-size: 12px; font-weight: bold; color: #1a73e8;
             margin-bottom: 20px; text-align: center;
         }
         #logo-bar .panel-toggle-btn {
@@ -58,20 +47,22 @@
             border-radius: 10px;
             margin-bottom: 10px;
             font-size: 18px;
-            background: var(--darker-green); /* Darker green for buttons */
-            color: var(--text-light);
+            background: #4CAF50; /* Corporate Green */
+            color: #fff;
             display: flex; align-items: center; justify-content: center;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             transition: background 0.2s ease, transform 0.2s ease;
         }
-        #logo-bar .panel-toggle-btn:hover { background: var(--primary-green); transform: translateY(-2px); }
-        #logo-bar .panel-toggle-btn.active { background: var(--primary-green); }
+        #logo-bar .panel-toggle-btn:hover { background: #45a049; transform: translateY(-2px); }
+        #logo-bar .panel-toggle-btn.active { background: #388E3C; }
+        #logo-bar .panel-toggle-btn.bell-active { background: #D50000; } /* Red for active bell */
+
 
         /* Panels (Controls, Info, Charts) */
         #controls, #info, #charts-panel {
             position: fixed;
             top: 15px;
-            background: var(--white); /* White background */
+            background: #ffffff;
             padding: 15px;
             border-radius: 15px;
             box-shadow: 0 5px 25px rgba(0,0,0,0.15);
@@ -79,15 +70,15 @@
             max-height: 90vh;
             overflow-y: auto;
             min-width: 250px;
-            width: 280px;
+            width: 280px; /* Adjusted slightly */
             transition: left 0.3s ease, right 0.3s ease, width 0.3s ease;
             z-index: 1050;
             display: none;
             border: 1px solid #e0e0e0;
         }
-        #controls { left: 75px; max-width: 320px; }
-        #info { right: 15px; max-width: 350px; }
-        #charts-panel { left: 380px; width: 360px; max-width: 380px;}
+        #controls { left: 75px; max-width: 300px; /* Adjusted slightly */ }
+        #info { right: 15px; max-width: 320px; /* Adjusted slightly */ }
+        #charts-panel { left: 380px; width: 340px; max-width: 360px; /* Adjusted slightly */}
 
         /* Dashboard Summary */
         #dashboard-summary {
@@ -98,16 +89,16 @@
         }
         .dashboard-box {
             flex: 1 0 48%;
-            background: var(--light-beige); /* Beige background */
+            background: #e8f5e9; /* Light Green */
             border-radius: 8px;
             text-align: center;
             padding: 10px 5px;
             min-width: 80px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-            border: 1px solid #d2e3fc; /* A subtle border that complements beige */
+            border: 1px solid #c8e6c9;
         }
-        .dashboard-box strong { display:block; font-size:18px; color:var(--accent-blue); margin-bottom: 3px; }
-        .dashboard-box span { font-size:12px; color:var(--text-dark); }
+        .dashboard-box strong { display:block; font-size:18px; color:#4CAF50; margin-bottom: 3px; } /* Corporate Green */
+        .dashboard-box span { font-size:12px; color:#555; }
 
         /* Form Elements */
         label { display: flex; align-items: center; margin-bottom: 6px; cursor: pointer; padding: 2px 0; border-radius: 3px; }
@@ -124,15 +115,15 @@
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
         input[type='text']:focus, input[type='date']:focus, select:focus, textarea:focus {
-            border-color: var(--primary-green); /* Green focus border */
-            box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2); /* Green shadow */
+            border-color: #4CAF50; /* Corporate Green */
+            box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
             outline: none;
         }
 
-        /* Buttons */
+        /* Buttons (General style) */
         button:not(.panel-toggle-btn) {
-            background-color: var(--primary-green); /* Green buttons */
-            color: var(--text-light);
+            background-color: #4CAF50; /* Corporate Green */
+            color: white;
             border: none;
             padding: 8px 15px;
             border-radius: 8px;
@@ -148,7 +139,16 @@
             justify-content: center;
             gap: 8px;
         }
-        button:not(.panel-toggle-btn):hover { background-color: var(--darker-green); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        button:not(.panel-toggle-btn):hover { background-color: #45a049; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        button.transparent-btn {
+            background-color: transparent;
+            color: #4CAF50; /* Corporate Green */
+            border: 1px solid #4CAF50;
+        }
+        button.transparent-btn:hover {
+            background-color: #e8f5e9; /* Light Green */
+            color: #388E3C;
+        }
 
         /* Color Dot for Filters */
         .color-dot {
@@ -159,8 +159,8 @@
         /* Filter Sections */
         #controls hr { margin: 15px 0; border-color: #eee; }
         .filter-section-header {
-            background-color: var(--primary-green); /* Green header */
-            color: var(--text-light);
+            background-color: #4CAF50; /* Corporate Green */
+            color: white;
             padding: 8px 12px;
             border-radius: 8px;
             cursor: pointer;
@@ -171,7 +171,7 @@
             align-items: center;
             transition: background 0.2s ease;
         }
-        .filter-section-header:hover { background-color: var(--darker-green); }
+        .filter-section-header:hover { background-color: #45a049; }
         .filter-content {
             padding: 8px 10px;
             border: 1px solid #e0e0e0;
@@ -186,35 +186,79 @@
 
         /* Popup Info Display */
         .popup-info-display div { margin-bottom: 4px; }
-        .leaflet-popup-content-wrapper { border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); background: var(--white); }
+        .leaflet-popup-content-wrapper { border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
         .leaflet-popup-content { margin: 10px; max-height: 250px; overflow-y: auto; font-size: 13px;}
 
-        /* Share and Edit Buttons */
-        .share-buttons button { margin-bottom: 6px; background-color: var(--accent-blue); font-size:13px; }
-        .share-buttons button:hover { background-color: darken(var(--accent-blue), 10%); }
-        .edit-data-btn {
-            background-color: #ffc107; /* Warning yellow */
-            color: var(--text-dark);
-            padding: 8px 10px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 13px;
-            margin-top: 8px;
-            width: 100%;
-            text-align: center;
-            box-sizing: border-box;
-            border: none;
-            transition: background 0.2s ease, transform 0.2s ease;
+        /* Share and Edit Buttons - Info Panel */
+        .info-panel-actions {
+            display: flex;
+            flex-wrap: wrap; /* Allow wrapping for smaller screens */
+            gap: 8px;
+            justify-content: center; /* Center buttons */
+            margin-top: 15px;
+            margin-bottom: 10px;
         }
-        .edit-data-btn:hover { background-color: #e0a800; transform: translateY(-1px); }
-        .edit-data-btn[style*="background-color: #17a2b8"] { background-color: var(--primary-green) !important; color: white; } /* Green for add inspection */
-        .edit-data-btn[style*="background-color: #17a2b8"]:hover { background-color: var(--darker-green) !important; }
-        .edit-data-btn[style*="background-color: #dc3545"] { background-color: #dc3545 !important; color: white; } /* Danger red for delete */
-        .edit-data-btn[style*="background-color: #dc3545"]:hover { background-color: #c82333 !important; }
+        .info-panel-actions .action-icon-btn {
+            background: #e8f5e9; /* Light Green background */
+            color: #4CAF50; /* Corporate Green icon color */
+            border: 1px solid #c8e6c9;
+            width: 45px; /* Fixed width for icon buttons */
+            height: 45px; /* Fixed height for icon buttons */
+            border-radius: 50%; /* Make them round */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            cursor: pointer;
+            transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        .info-panel-actions .action-icon-btn:hover {
+            background: #4CAF50; /* Corporate Green on hover */
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .info-panel-actions button:not(.action-icon-btn) { /* For password protected buttons */
+            background-color: #4CAF50; /* Corporate Green */
+            color: white;
+            width: 100%; /* Full width */
+            padding: 10px;
+            font-size: 14px;
+        }
+        .info-panel-actions button.delete-btn {
+            background-color: #D32F2F; /* Darker Red for delete */
+        }
+        .info-panel-actions button.delete-btn:hover {
+            background-color: #C62828;
+        }
+        /* Close button for info panel */
+        .info-panel-close-btn {
+            background-color: #6c757d;
+            color: white;
+            width: 40px; /* Fixed width for close icon button */
+            height: 40px; /* Fixed height for close icon button */
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            cursor: pointer;
+            border: none;
+            position: absolute; /* Position relative to info panel */
+            top: 10px;
+            left: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .info-panel-close-btn:hover {
+            background-color: #5a6268;
+            transform: rotate(90deg); /* Little animation */
+        }
+
 
         /* Charts Panel */
-        #charts-panel h3, #charts-panel h4 { font-size:15px; margin-top:10px; margin-bottom: 10px; color:var(--accent-blue); }
-        #charts-panel canvas { background:var(--white); border-radius:8px; padding: 5px; border: 1px solid #eee;}
+        #charts-panel h3, #charts-panel h4 { font-size:15px; margin-top:10px; margin-bottom: 10px; color: #333; }
+        #charts-panel canvas { background:#f9f9f9; border-radius:8px; padding: 5px; border: 1px solid #eee;}
 
         /* Print Styles */
         @media print {
@@ -235,50 +279,52 @@
                 width: 60px; height: 60px; margin-left: 15px;
             }
             #print-area .report-title {
-                font-size: 20px; color: var(--accent-blue); margin: 0 0 5px 0; font-weight: bold;
+                font-size: 20px; color: #4CAF50; margin: 0 0 5px 0; font-weight: bold; /* Corporate Green */
             }
             #print-area .report-table {
                 width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 13px; background: #fff;
-                table-layout: auto; /* Allow column width to adjust to content */
+                table-layout: fixed; /* Added for better page adaptation */
             }
             #print-area .report-table th, #print-area .report-table td {
                 border: 1px solid #d0d0d0; padding: 5px 8px; text-align: right;
+                word-break: break-all; /* Added for better page adaptation */
             }
             #print-area .report-table th {
-                background: #e9ecef; font-weight: bold; color: var(--text-dark);
-            }
-            #print-area .report-table tbody tr {
-                page-break-inside: avoid; /* Keep table rows together */
-            }
-            #print-area .report-table thead {
-                display: table-header-group; /* Repeat table header on each page */
+                background: #e9ecef; font-weight: bold; color: #444;
             }
         }
 
         /* Responsive Adjustments */
         @media (max-width: 900px) {
-            #controls, #info, #charts-panel {
-                left: 65px !important; right: unset !important; width: 95vw !important; max-width: 95vw;
+            #controls, #info {
+                left: 65px !important; right: unset !important; width: calc(100vw - 80px) !important; max-width: calc(100vw - 80px);
                 border-radius: 0 0 15px 15px;
                 transform: none !important;
                 top: 10px;
+                display: none; /* Hidden by default and shown by JS */
             }
-            #info { right: 10px !important; left: unset !important; }
-            #charts-panel { left: 55vw !important; width: 95vw !important; }
+            #info { right: 10px !important; left: unset !important; } /* Info panel still prefers right on mobile */
+            #charts-panel {
+                left: 65px !important; /* Align charts panel with controls */
+                width: calc(100vw - 80px) !important; max-width: calc(100vw - 80px) !important;
+                top: 10px;
+            }
             #logo-bar { width: 50px; }
             #logo-bar img { width:38px;height:38px; }
         }
         @media (max-width: 600px) {
-            #controls, #info, #charts-panel {
-                left: 55px !important; right: unset !important; width: 90vw !important; max-width: 90vw !important;
+            #controls, #info {
+                left: 55px !important; right: unset !important; width: calc(100vw - 60px) !important; max-width: calc(100vw - 60px) !important;
                 border-radius: 0 0 12px 12px;
                 font-size: 12px !important;
                 min-height: unset !important;
                 padding: 10px;
             }
             #info { right: 5px !important; left: unset !important; }
-            #charts-panel { left: 50vw !important; width: 90vw !important; }
-            #map { min-height: 100vh !important; }
+            #charts-panel {
+                left: 55px !important;
+                width: calc(100vw - 60px) !important; max-width: calc(100vw - 60px) !important;
+            }
             #logo-bar { width: 45px; }
             #logo-bar img { width:32px;height:32px; }
             .dashboard-box strong { font-size: 16px; }
@@ -291,8 +337,8 @@
             bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background-color: var(--text-dark); /* Dark background for info/default */
-            color: var(--text-light);
+            background-color: #333;
+            color: white;
             padding: 12px 25px;
             border-radius: 8px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.2);
@@ -302,31 +348,57 @@
             transition: opacity 0.3s ease-in-out;
             font-size: 14px;
             text-align: center;
+            min-width: 280px; /* Ensure it's readable */
+            max-width: 90vw;
         }
         #notification-popup.show {
             opacity: 1;
             display: block;
         }
         #notification-popup.success {
-            background-color: var(--primary-green); /* Green for success */
+            background-color: #4CAF50; /* Green for success */
         }
         #notification-popup.error {
-            background-color: #dc3545; /* Red for error */
+            background-color: #D32F2F; /* Darker Red for error */
         }
-        /* Buttons within interactive notification */
-        #notification-popup button {
-            background-color: var(--primary-green); /* Confirm button green */
-            color: var(--text-light);
+        #notification-popup.info {
+            background-color: #2196F3; /* Blue for info - distinct from corporate green */
         }
-        #notification-popup button:hover {
-            background-color: var(--darker-green);
+        /* Custom style for interactive notification */
+        #notification-popup.interactive {
+            background-color: #e8f5e9; /* Light green background for interactive */
+            color: #333;
+            border: 1px solid #4CAF50; /* Corporate green border */
         }
-        #notification-popup button[style*="background-color: #6c757d"] {
-            background-color: #6c757d !important; /* Cancel button grey */
+        #notification-popup.interactive button {
+            background-color: #4CAF50; /* Corporate Green for interactive buttons */
+            color: white;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            border: none;
+            font-size: 13px;
         }
-        #notification-popup button[style*="background-color: #6c757d"]:hover {
-            background-color: #5a6268 !important;
+        #notification-popup.interactive button:hover {
+            background-color: #45a049;
         }
+        #notification-popup.interactive button.cancel {
+            background-color: #6c757d;
+        }
+        #notification-popup.interactive button.cancel:hover {
+            background-color: #5a6268;
+        }
+        .notification-list-item {
+            border-bottom: 1px solid rgba(0,0,0,0.1);
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+        .notification-list-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
     </style>
     <script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'></script>
     <script src='https://code.jquery.com/jquery-3.7.1.min.js'></script>
@@ -338,6 +410,7 @@
         <button class='panel-toggle-btn' id='toggleControlsBtn' title="لوحة الفلاتر"><i class='fas fa-bars'></i></button>
         <button class='panel-toggle-btn' id='toggleChartsBtn' title="الرسوم البيانية"><i class='fas fa-chart-pie'></i></button>
         <button class='panel-toggle-btn' id='toggleInfoBtn' title="معلومات النقطة"><i class='fas fa-info-circle'></i></button>
+        <button class='panel-toggle-btn' id='triggerWarningBtn' title="تلقي الإشعارات"><i class='fas fa-bell'></i></button>
     </div>
     <div id='map'></div>
     <div id='controls'>
@@ -363,6 +436,13 @@
         <div id='action-filters-content' class='filter-content'>
             <input class="filter-search-box" type="text" placeholder="بحث في الإجراءات..." oninput="filterFilterOptions('action-filters', this.value)">
             <div id='action-filters'></div>
+        </div>
+        <div class="filter-section-header" onclick="toggleFilterContent('area-filters-content')">
+            <span><i class='fas fa-map'></i> المنطقة</span> <i class="fas fa-chevron-down"></i>
+        </div>
+        <div id='area-filters-content' class='filter-content'>
+            <input class="filter-search-box" type="text" placeholder="بحث في المناطق..." oninput="filterFilterOptions('area-filters', this.value)">
+            <div id='area-filters'></div>
         </div>
         <div class="filter-section-header" onclick="toggleFilterContent('activity-filters-content')">
             <span><i class='fas fa-briefcase'></i> النشاط</span> <i class="fas fa-chevron-down"></i>
@@ -419,50 +499,52 @@
             <option value="car">سيارة</option>
             <option value="walk">مشي</option>
         </select>
-        <button onclick="checkNearbyWarnings()"><i class='fas fa-bell'></i> التحقق من تحذيرات الانتهاء</button>
-        <button onclick="showPanel('charts-panel');"><i class='fas fa fa-chart-pie'></i> عرض الرسوم البيانية</button>
+        <button onclick="openNewEstablishmentForm()"><i class='fas fa-plus-circle'></i> إضافة منشأة جديدة</button>
         <button onclick="printAllFilteredRecords()"><i class='fas fa-print'></i> طباعة تقرير البيانات</button>
         <button onclick="exportExcel()"><i class='fas fa-file-excel'></i> تصدير البيانات إلى Excel</button>
-        <button onclick="openNewEstablishmentForm()"><i class='fas fa-plus-circle'></i> إضافة منشأة جديدة</button>
     </div>
     <div id='info'>
-        <h3 style="margin-bottom:10px;font-size:15px; color:var(--accent-blue);">معلومات المنشأة</h3>
-        <div id="info-details-container">
+        <button class="info-panel-close-btn" onclick="$('#info').hide();"><i class="fas fa-times"></i></button>
+        <h3 style="margin-bottom:10px;font-size:15px; color:#4CAF50; text-align: center; margin-top: 5px;">معلومات المنشأة</h3> <div id="info-details-container">
             <p>اضغط على نقطة في الخريطة لعرض تفاصيلها.</p>
         </div>
         <div id="previous-inspections" style="margin-top:15px;"></div>
-        <div class="share-buttons">
-            <button class="whatsapp-btn" id="whatsapp-btn"><i class="fab fa-whatsapp"></i> واتساب</button>
-            <button class="email-btn" id="email-btn"><i class="fas fa-envelope'></i> بريد إلكتروني</button>
-            <button class="location-btn" id="location-btn"><i class="fas fa-map-marker-alt"></i> الموقع الجغرافي</button>
-            <button class="edit-data-btn" id="edit-data-btn"><i class="fas fa-edit"></i> تعديل بيانات المنشأة</button>
-            <button class="edit-data-btn" style="background-color: #17a2b8;" id="add-inspection-btn"><i class="fas fa-clipboard-list"></i> إضافة/تعديل زيارة تفتيش</button>
-            <button class="edit-data-btn" style="background-color: #dc3545;" id="delete-establishment-btn"><i class="fas fa-trash'></i> حذف المنشأة</button>
+        <div class="info-panel-actions">
+            <button class="action-icon-btn" id="whatsapp-btn" title="واتساب"><i class="fab fa-whatsapp"></i></button>
+            <button class="action-icon-btn" id="email-btn" title="بريد إلكتروني"><i class="fas fa-envelope"></i></button>
+            <button class="action-icon-btn" id="location-btn" title="الموقع الجغرافي"><i class="fas fa-map-marker-alt"></i></button>
+            <button id="edit-data-btn" style="width: 100%;"><i class="fas fa-edit"></i> تعديل بيانات المنشأة</button>
+            <button id="add-inspection-btn" style="width: 100%;"><i class="fas fa-clipboard-list"></i> إضافة/تعديل زيارة تفتيش</button>
+            <button class="delete-btn" id="delete-establishment-btn" style="width: 100%;"><i class="fas fa-trash"></i> حذف المنشأة</button>
         </div>
-        <button onclick="$('#info').hide();" style="margin-top:10px; background-color: #6c757d;">إغلاق</button>
     </div>
     <div id="charts-panel">
-        <h3 style="font-size:15px;margin-bottom:10px; color:var(--accent-blue);">تقرير الرسوم البيانية</h3>
-        <div id="charts-container"></div>
+        <h3 style="font-size:15px;margin-bottom:10px; color:#4CAF50;">تقرير الرسوم البيانية</h3> <div id="charts-container"></div>
         <button onclick="printChartReport()"><i class='fas fa-print'></i> طباعة تقرير الرسوم البيانية</button>
         <button onclick="$('#charts-panel').hide();" style="background-color: #6c757d;">إغلاق</button>
     </div>
     <div id="print-area" style="display:none;"></div>
-    <div id="notification-popup"></div> <script>
-        console.log("Start of script execution."); // Debug log
+    <div id="notification-popup"></div>
+
+    <script>
         var map = L.map('map').setView([25.34626, 55.4212], 12);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
             attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
             maxZoom: 19
         }).addTo(map);
-        console.log("Leaflet map initialized."); // Debug log
 
         var allPointsLayer = L.layerGroup().addTo(map);
         var allRecords = [];
         var filteredRecords = [];
         var actionPriority = ['انذار', 'مهلة', 'مخالفة', 'مناسب'];
-        var notified = new Set(); // To track notified facilities for WarningPeriod expiration
-        console.log("Global variables initialized."); // Debug log
+        var currentChartInstances = []; // To store chart instances for destruction
+
+        // Notification queue variables
+        var warningQueue = [];
+        var currentWarningIndex = 0;
+        var isNotificationsActive = false; // New state variable for notifications
+
+        const ADMIN_PASSWORD = "ZH2025"; // Define the admin password
 
         function getActionColor(actionString, selectedActions = []) {
             if (!actionString) return '#b2bec3';
@@ -513,11 +595,12 @@
             `;
             return contentHtml;
         }
+
         function renderPoints(pointsToRender) {
-            console.log("renderPoints called with", pointsToRender.length, "points."); // Debug log
             allPointsLayer.clearLayers();
             filteredRecords = pointsToRender;
             var selectedActions = Array.from(document.querySelectorAll('#action-filters input[type="checkbox"].action-filter:checked')).map(cb => cb.value);
+
             pointsToRender.forEach(function(record) {
                 if (record.site_coordinates) {
                     const coords = record.site_coordinates.split(',').map(Number);
@@ -534,21 +617,19 @@
                         const popupContent = createPopupContent(record);
                         pointMarker.bindPopup(popupContent);
                         pointMarker.on('popupopen', function (e) {
-                            console.log("Marker popup opened for:", record.facility_name); // Debug log
-                            // Ensure only the info panel is shown when a marker is clicked
-                            $('#info').show();
+                            // Only hide charts panel, allow controls and info to be open
                             $('#charts-panel').hide();
-                            $('#controls').hide();
+                            // Show info panel
+                            $('#info').show();
                             updateInfoPanel(record);
                         });
                     }
                 }
             });
             updateMainSummary();
-            console.log("Points rendered and summary updated."); // Debug log
         }
+
         function updateMainSummary() {
-            console.log("updateMainSummary called."); // Debug log
             $('#summary-total').text(filteredRecords.length);
             let actions = 0;
             filteredRecords.forEach(r => {
@@ -559,33 +640,48 @@
             });
             $('#summary-total-actions').text(actions);
         }
+
         function filterFilterOptions(containerId, searchValue) {
-            console.log("filterFilterOptions called for", containerId, "with search:", searchValue); // Debug log
             searchValue = searchValue.trim().toLowerCase();
             $('#' + containerId + ' label').each(function() {
-                if (searchValue === '') { $(this).show(); return; }
+                // Skip the "Select All" label from filtering
+                if ($(this).find('.select-all-filter').length > 0) {
+                    $(this).show();
+                    return true; // Continue to next iteration
+                }
+
                 let text = $(this).text().toLowerCase();
-                if (text.indexOf(searchValue) !== -1) $(this).show();
-                else $(this).hide();
+                if (searchValue === '' || text.indexOf(searchValue) !== -1) {
+                    $(this).show();
+                } else {
+                    $(this).hide();
+                }
             });
         }
+
         function toggleFilterContent(contentId) {
-            console.log("toggleFilterContent called for", contentId); // Debug log
             $(`#${contentId}`).slideToggle(160);
         }
-        function showPanel(panel) {
-            console.log("showPanel called for:", panel); // Debug log
-            // Hide all panels first, then show the requested one
-            $('#controls, #info, #charts-panel').hide();
-            $("#" + panel).show();
-            // Adjust position for responsive layout if needed
-            if (panel === 'controls') { $('#controls').css('left', '75px'); }
-            else if (panel === 'charts-panel') { $('#charts-panel').css('left', '380px'); }
-            else if (panel === 'info') { $('#info').css('right', '15px'); }
+
+        // Modified showPanel to allow controls and info to be open simultaneously
+        function togglePanel(panelId) {
+            if (panelId === 'charts-panel') {
+                // Charts panel is exclusive
+                $('#controls, #info').hide(); // Hide other panels
+                renderCharts(); // Render charts every time it's opened
+                $('#charts-panel').toggle();
+            } else {
+                // Controls and Info can be open simultaneously
+                $(`#${panelId}`).toggle();
+                if (panelId === 'info' && $('#info').is(':visible')) {
+                    // When info panel is opened, check if there's a selected point, otherwise show default message
+                    // (The logic to populate info panel is handled by pointMarker.on('popupopen'))
+                    // If info is opened by button, it will show previous point or "click on map" message.
+                }
+            }
         }
 
         function updateInfoPanel(record) {
-            console.log("updateInfoPanel called for record:", record.facility_name); // Debug log
             let infoHtml = `
                 <div><strong>معرف المنشأة (ID): </strong><span>${record.facility_ID || 'غير متوفر'}</span></div>
                 <div><strong>رقم الرخصة: </strong><span>${record.license_no || 'غير متوفر'}</span></div>
@@ -603,8 +699,7 @@
                 <div><strong>الأنشطة التفصيلية: </strong><span>${record.detailed_activities || 'غير متوفر'}</span></div>
                 <div><strong>الإحداثيات: </strong><span>${record.site_coordinates || 'غير متوفر'}</span></div>
                 <hr>
-                <h4 style="font-size:14px; color:var(--accent-blue);">آخر تفتيش:</h4>
-                <div><strong>تاريخ التفتيش: </strong><span>${record.latest_Inspectiondate || 'لا يوجد تاريخ'}</span></div>
+                <h4 style="font-size:14px; color:#4CAF50;">آخر تفتيش:</h4> <div><strong>تاريخ التفتيش: </strong><span>${record.latest_Inspectiondate || 'لا يوجد تاريخ'}</span></div>
                 <div><strong>الإجراء: </strong><span>${record.latest_Action || 'لا يوجد إجراء'}</span></div>
                 <div><strong>نوع التفتيش: </strong><span>${record.latest_InspectionType || 'غير محدد'}</span></div>
                 <div><strong>درجة التقييم: </strong><span>${record.latest_EvaluationResult || 'غير محدد'}</span></div>
@@ -613,28 +708,37 @@
                 <div><strong>رقم المفتش: </strong><span>${record.latest_InspectorID || 'غير محدد'}</span></div>
             `;
             $('#info-details-container').html(infoHtml);
+
+            // Re-bind click handlers to ensure they are for the current record
             $('#whatsapp-btn').off('click').on('click', () => sendWhatsApp(record.facility_ID));
             $('#email-btn').off('click').on('click', () => sendEmail(record.facility_ID));
             $('#location-btn').off('click').on('click', () => openLocation(record.facility_ID));
-            $('#edit-data-btn').off('click').on('click', () => openEditEstablishmentForm(record.facility_unq_id));
-            $('#add-inspection-btn').off('click').on('click', () => openAddEditInspectionForm(record.facility_unq_id));
-            $('#delete-establishment-btn').off('click').on('click', () => deleteEstablishment(record.facility_unq_id));
+
+            // Password protected buttons
+            $('#edit-data-btn').off('click').on('click', () => openEditEstablishmentForm(record.facility_unq_id)); // No password
+            $('#add-inspection-btn').off('click').on('click', () => openAddEditInspectionForm(record.facility_unq_id)); // No password
+            $('#delete-establishment-btn').off('click').on('click', () => promptForPassword(() => deleteEstablishment(record.facility_unq_id))); // Password
+
+            // Fetch previous inspections
             $.getJSON('get_inspections.php?facility_unq_id=' + record.facility_unq_id, function(data) {
                 if(data.success && data.data && data.data.length) {
                     let year = (new Date).getFullYear()+'';
                     let visits = data.data.filter(x => x.date && x.date.startsWith(year));
-                    let html = '<h5 style="font-size:13px; color:var(--accent-blue);">زيارات هذا العام:</h5><ul style="padding-right:20px; margin-top:5px; list-style-type: disc;">';
+                    let html = '<h5 style="font-size:13px; color:#4CAF50;">زيارات هذا العام:</h5><ul style="padding-right:20px; margin-top:5px; list-style-type: disc;">'; // Corporate Green
                     visits.forEach(v => html += `<li>${v.date} - ${v.action || ''}</li>`);
                     html += '</ul>';
                     $('#previous-inspections').html(html);
                 } else {
                     $('#previous-inspections').html('<div style="font-size:13px; color:#666;">لا توجد زيارات خلال العام الحالي.</div>');
                 }
+            }).fail(function() {
+                 $('#previous-inspections').html('<div style="font-size:13px; color:#666;">خطأ في جلب زيارات التفتيش.</div>');
             });
         }
+
         function filterPoints() {
-            console.log("filterPoints called."); // Debug log
             var selectedActions = Array.from(document.querySelectorAll('#action-filters input[type="checkbox"].action-filter:checked')).map(cb => cb.value);
+            var selectedAreas = Array.from(document.querySelectorAll('#area-filters input[type="checkbox"].area-filter:checked')).map(cb => cb.value); // New filter
             var selectedActivities = Array.from(document.querySelectorAll('#activity-filters input[type="checkbox"].activity-filter:checked')).map(cb => cb.value);
             var selectedLicenseIssuing = Array.from(document.querySelectorAll('#license-issuing-filters input[type="checkbox"].license-issuing-filter:checked')).map(cb => cb.value);
             var selectedLtype = Array.from(document.querySelectorAll('#ltype-filters input[type="checkbox"].ltype-filter:checked')).map(cb => cb.value);
@@ -646,16 +750,11 @@
             const {from, to} = getDateRangeFilterValues();
             const showAllFacilities = $('#show-all-facilities').is(':checked');
 
-            console.log("Filtering points with:");
-            console.log("  Selected Actions:", selectedActions);
-            console.log("  Selected Activities:", selectedActivities);
-            console.log("  Search Text:", searchText);
-            console.log("  Date Range:", from, to);
-            console.log("  Show All Facilities:", showAllFacilities);
-
-            var filteredPoints = allRecords.filter(function(point) {
+            var currentFilteredPoints = allRecords.filter(function(point) {
                 var actionMatch = selectedActions.length === 0 ||
                     (point.latest_Action && selectedActions.some(selAction => point.latest_Action.split(',').map(a=>a.trim()).includes(selAction)));
+                var areaMatch = selectedAreas.length === 0 || // New filter match
+                    (point.area && selectedAreas.includes(point.area));
                 var activityMatch = selectedActivities.length === 0 ||
                     (point.activity_type && selectedActivities.includes(point.activity_type));
                 var licenseIssuingMatch = selectedLicenseIssuing.length === 0 ||
@@ -673,6 +772,7 @@
                 var searchMatch = searchText === '' ||
                     (point.license_no && String(point.license_no).toLowerCase().includes(searchText)) ||
                     (point.facility_name && point.facility_name.toLowerCase().includes(searchText));
+
                 let inspectionDate = point.latest_Inspectiondate || '';
                 let inDateRange = true;
                 if(from) inDateRange = inspectionDate >= from;
@@ -680,105 +780,106 @@
                 let isInspected = !!inspectionDate;
                 let facilityMatch = showAllFacilities ? true : isInspected;
 
-                // console.log(`  Point ${point.facility_name}: Action Match: ${actionMatch}, Activity Match: ${activityMatch}, Search Match: ${searchMatch}, Date Range Match: ${inDateRange}, Facility Match: ${facilityMatch}`);
-
-                return actionMatch && activityMatch && licenseIssuingMatch && ltypeMatch &&
-                facilityStatusMatch && unitMatch && shjhspMatch && hazardClassMatch && searchMatch && inDateRange && facilityMatch;
+                return actionMatch && areaMatch && activityMatch && licenseIssuingMatch && ltypeMatch && // Include areaMatch
+                       facilityStatusMatch && unitMatch && shjhspMatch && hazardClassMatch &&
+                       searchMatch && inDateRange && facilityMatch;
             });
-            renderPoints(filteredPoints);
-            reFilterAll(); // Re-render filters based on currently *displayed* points counts
-            console.log("filterPoints finished."); // Debug log
+            renderPoints(currentFilteredPoints);
+            // Re-render filter checkboxes based on the *newly filtered* records
+            reFilterAll();
         }
+
         function fetchAndRenderPoints() {
-            console.log("fetchAndRenderPoints called. Attempting to fetch data from get_map_data.php"); // Debug log
             fetch('get_map_data.php')
-            .then(response => {
-                console.log("Response received from get_map_data.php. Status:", response.status); // Debug log
-                if (!response.ok) {
-                    throw new Error(`HTTP error! Status: ${response.status}`);
-                }
-                return response.json();
-            })
+            .then(response => response.json())
             .then(data => {
-                console.log("Data successfully parsed:", data); // Debug log
                 if (data.success) {
                     allRecords = data.data;
-                    console.log("Total records loaded:", allRecords.length); // Debug log
-                    renderPoints(allRecords);
-                    reFilterAll();
+                    renderPoints(allRecords); // Initial render with all records
+                    reFilterAll(); // Populate filters based on all records initially
                 } else {
                     showNotification('فشل جلب بيانات الخريطة: ' + (data.msg || 'خطأ غير معروف'), 'error');
-                    console.error("Failed to fetch map data:", data.msg); // Debug log
                 }
             })
             .catch(error => {
                 showNotification('خطأ في الاتصال بالخادم لجلب بيانات الخريطة: ' + error.message, 'error');
-                console.error("Fetch error for get_map_data.php:", error); // Debug log
             });
         }
+
         function getDateRangeFilterValues() {
             let from = $('#inspection-date-from').val();
             let to = $('#inspection-date-to').val();
             return {from, to};
         }
+
         function getUniqueFilteredSet(field) {
             let values = new Set();
-            filteredRecords.forEach(record => {
+            filteredRecords.forEach(record => { // IMPORTANT: Use filteredRecords here
                 if (field === 'latest_Action' && record.latest_Action) {
-                    record.latest_Action.split(',').map(a => a.trim()).forEach(action => values.add(action));
+                    record.latest_Action.split(',').map(a => a.trim()).filter(Boolean).forEach(action => values.add(action));
                 }
                 else if (record[field]) values.add(record[field]);
             });
             return values;
         }
-        function createFilterCheckboxes(containerId, valuesSet, className, dataField = null, colorFunction = null) {
-            console.log("createFilterCheckboxes called for:", containerId); // Debug log
-            const container = document.getElementById(containerId);
-            // Capture currently checked values BEFORE clearing the container
-            const checkedValues = Array.from(container.querySelectorAll(`input[type="checkbox"].${className}:checked`)).map(cb => cb.value);
-            
-            container.innerHTML = ''; // Clear container
 
-            // Add "Select All" checkbox
+        function createFilterCheckboxes(containerId, valuesSet, className, dataField = null, colorFunction = null) {
+            const container = document.getElementById(containerId);
+            const prevCheckedValues = Array.from(container.querySelectorAll(`input[type="checkbox"].${className}:checked`)).map(cb => cb.value);
+            container.innerHTML = '';
+
             const selectAllLabel = document.createElement('label');
             const selectAllCheckbox = document.createElement('input');
             selectAllCheckbox.type = 'checkbox';
-            selectAllCheckbox.className = 'select-all-filter';
+            selectAllCheckbox.className = `select-all-filter ${className}-all`; // Add specific class for select all
             selectAllCheckbox.value = 'all';
-            // Set initial state of "Select All" based on previously checked items
-            selectAllCheckbox.checked = (checkedValues.length > 0 && checkedValues.length === Array.from(valuesSet).length) || (checkedValues.length === 0 && valuesSet.size === 0);
 
             selectAllCheckbox.onchange = function() {
-                console.log("Select All checkbox changed for", containerId, "to:", this.checked); // Debug log
                 const checkboxes = container.querySelectorAll(`.${className}`);
-                checkboxes.forEach(cb => { cb.checked = this.checked; });
-                filterPoints(); // Trigger filter after selecting/deselecting all
+                checkboxes.forEach(cb => {
+                    if (cb !== this) { // Don't re-toggle the select all checkbox itself
+                         cb.checked = this.checked;
+                    }
+                });
+                filterPoints(); // Filter once after all checkboxes are toggled
             };
             selectAllLabel.appendChild(selectAllCheckbox);
             selectAllLabel.appendChild(document.createTextNode('تحديد الكل'));
             container.appendChild(selectAllLabel);
 
             const counts = {};
-            filteredRecords.forEach(record => {
+            filteredRecords.forEach(record => { // Count based on current filtered records
+                let value;
                 if (dataField === 'latest_Action' && record.latest_Action) {
-                    record.latest_Action.split(',').map(a => a.trim()).forEach(action => {
+                    record.latest_Action.split(',').map(a => a.trim()).filter(Boolean).forEach(action => {
                         counts[action] = (counts[action] || 0) + 1;
                     });
-                } else if (record[dataField]) {
-                    counts[record[dataField]] = (counts[record[dataField]] || 0) + 1;
+                    return;
+                } else {
+                    value = record[dataField];
                 }
+                if (value) { counts[value] = (counts[value] || 0) + 1; }
             });
-            
-            // Add individual filter options
-            Array.from(valuesSet).sort().forEach(value => {
+
+            let allOptionsAreCurrentlyChecked = true; // Track state for current filter options
+            let optionsCount = 0; // Count actual options, excluding 'select all'
+            const sortedValues = Array.from(valuesSet).sort();
+
+            sortedValues.forEach(value => {
+                optionsCount++;
                 const label = document.createElement('label');
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
                 checkbox.className = className;
                 checkbox.value = value;
-                // Restore checked state for individual checkboxes
-                if (checkedValues.includes(value)) checkbox.checked = true;
-                
+
+                // Restore previous checked state
+                if (prevCheckedValues.includes(value)) {
+                    checkbox.checked = true;
+                } else {
+                    allOptionsAreCurrentlyChecked = false; // If any is not checked, 'select all' shouldn't be
+                }
+
                 label.appendChild(checkbox);
                 if (colorFunction) {
                     const colorDot = document.createElement('span');
@@ -790,23 +891,25 @@
                 label.appendChild(document.createTextNode(`${value} (${count})`));
                 container.appendChild(label);
             });
-            // Attach a single delegated event listener for all checkboxes in this container
-            $('#' + containerId).off('change').on('change', `.${className}`, function() {
-                console.log("Individual filter checkbox changed for", containerId, "value:", this.value, "checked:", this.checked); // Debug log
-                filterPoints(); // Trigger filter when any individual checkbox changes
-                const allSpecificCheckboxes = document.querySelectorAll(`#${containerId} .${className}`);
-                const checkedSpecificCheckboxes = document.querySelectorAll(`#${containerId} .${className}:checked`);
-                const selectAllCheckbox = document.querySelector(`#${containerId} .select-all-filter`);
-                if (allSpecificCheckboxes.length > 0 && checkedSpecificCheckboxes.length === allSpecificCheckboxes.length) {
-                    selectAllCheckbox.checked = true;
-                } else {
-                    selectAllCheckbox.checked = false;
-                }
+
+            // Set the 'select all' checkbox state based on if all actual options are checked
+            // Also, only check "select all" if there are actually options to select
+            selectAllCheckbox.checked = (optionsCount > 0 && allOptionsAreCurrentlyChecked);
+
+            // This re-binding is crucial to ensure filterPoints is called only once per 'change' event
+            $('#' + containerId).off('change', `.${className}`).on('change', `.${className}`, function() {
+                // Update 'select all' checkbox state when individual checkboxes change
+                const allChecked = Array.from(container.querySelectorAll(`.${className}`)).every(cb => cb.checked);
+                selectAllCheckbox.checked = allChecked;
+                filterPoints(); // Call filterPoints whenever a filter checkbox changes
             });
         }
+
+
         function reFilterAll() {
-            console.log("reFilterAll called."); // Debug log
+            // Recreate all filter checkboxes with the current filteredRecords set
             createFilterCheckboxes('action-filters', getUniqueFilteredSet('latest_Action'), 'action-filter', 'latest_Action', getActionColor);
+            createFilterCheckboxes('area-filters', getUniqueFilteredSet('area'), 'area-filter', 'area'); // New area filter
             createFilterCheckboxes('activity-filters', getUniqueFilteredSet('activity_type'), 'activity-filter', 'activity_type', getActivityColor);
             createFilterCheckboxes('license-issuing-filters', getUniqueFilteredSet('LicenseIssuing'), 'license-issuing-filter', 'LicenseIssuing');
             createFilterCheckboxes('ltype-filters', getUniqueFilteredSet('ltype'), 'ltype-filter', 'ltype');
@@ -815,12 +918,17 @@
             createFilterCheckboxes('shjhsp-filters', getUniqueFilteredSet('shjhsp'), 'shjhsp-filter', 'shjhsp');
             createFilterCheckboxes('hazard-class-filters', getUniqueFilteredSet('hazard_class'), 'hazard-class-filter', 'hazard_class');
         }
+
         function renderCharts() {
-            console.log("renderCharts called."); // Debug log
-            $('#charts-container').empty();
+            // Destroy existing charts before rendering new ones to prevent memory leaks and canvas issues
+            currentChartInstances.forEach(chart => chart.destroy());
+            currentChartInstances = []; // Clear the array
+
+            $('#charts-container').empty(); // Clear the container for new charts
+
             const filters = [
                 { key: 'activity_type', label: 'الأنشطة' },
-                { key: 'area', label: 'المناطق' },
+                { key: 'area', label: 'المناطق' }, // Added area to charts
                 { key: 'LicenseIssuing', label: 'جهة الإصدار' },
                 { key: 'ltype', label: 'نوع الرخصة' },
                 { key: 'facility_status', label: 'حالة المنشأة' },
@@ -828,82 +936,166 @@
                 { key: 'shjhsp', label: 'SHJHSP' },
                 { key: 'hazard_class', label: 'درجة الخطورة' }
             ];
+
             filters.forEach(f => {
                 let dataMap = {};
                 filteredRecords.forEach(rec => {
                     const fval = rec[f.key] || 'غير محدد';
                     if (!dataMap[fval]) dataMap[fval] = {};
                     if (rec.latest_Action) {
-                        rec.latest_Action.split(',').map(a=>a.trim()).forEach(action => {
+                        rec.latest_Action.split(',').map(a=>a.trim()).filter(Boolean).forEach(action => { // Ensure action is not empty
                             dataMap[fval][action] = (dataMap[fval][action]||0)+1;
                         });
                     }
                 });
-                let labels = Object.keys(dataMap);
-                let actionTypes = Array.from(new Set([].concat(...labels.map(l => Object.keys(dataMap[l])))));
-                let datasets = actionTypes.map(act => ({
+
+                let labels = Object.keys(dataMap).sort(); // Sort labels for consistent chart display
+                let allActionTypes = Array.from(new Set(
+                    [].concat(...labels.map(l => Object.keys(dataMap[l])))
+                )).sort((a,b) => actionPriority.indexOf(a) - actionPriority.indexOf(b)); // Sort by action priority
+
+                // Create a dataset for each action type
+                let datasets = allActionTypes.map(act => ({
                     label: act,
                     backgroundColor: colorForAction(act),
-                    data: labels.map(l => dataMap[l][act]||0)
+                    data: labels.map(l => dataMap[l][act] || 0)
                 }));
-                let chartId = `${f.key}Chart`;
-                $('#charts-container').append(`
-                    <div style="margin-bottom: 25px;">
-                        <h4 style="font-size:14px; margin-bottom:12px; border-bottom: 1px solid #eee; padding-bottom: 8px;">توزيع الإجراءات حسب ${f.label}</h4>
-                        <canvas id="${chartId}" style="height: 200px; width: 100%;"></canvas>
-                    </div>
-                `);
-                let ctx = document.getElementById(chartId).getContext('2d');
-                new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: labels,
-                        datasets: datasets
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { position: 'top', labels: { font: { size: 12, family: 'Cairo' } } },
-                            datalabels: {
-                                display: true,
-                                color: '#222',
-                                font: {weight:'bold',size:10, family: 'Cairo'},
-                                anchor: 'end',
-                                align: 'top',
-                                formatter: (value, ctx) => value > 0 ? value : ''
-                            }
-                        },
-                        scales: {
-                            y: { beginAtZero: true, ticks: { font: { size: 11, family: 'Cairo' }, color: '#555'} },
-                            x: { ticks: { font: { size: 10, family: 'Cairo' }, color: '#555'} }
-                        }
-                    },
-                    plugins: [ChartDataLabels]
-                });
+
+                // Only render chart if there is data
+                if (labels.length > 0) {
+                    let chartId = `${f.key}Chart`;
+                    $('#charts-container').append(`
+                        <div style="margin-bottom: 25px; page-break-inside: avoid;">
+                            <h4 style="font-size:14px; margin-bottom:12px; border-bottom: 1px solid #eee; padding-bottom: 8px;">توزيع الإجراءات حسب ${f.label}</h4>
+                            <canvas id="${chartId}" style="height: 250px; width: 100%;"></canvas>
+                        </div>
+                    `);
+                    let ctx = document.getElementById(chartId);
+                    if (ctx) { // Ensure canvas context exists
+                        let newChart = new Chart(ctx.getContext('2d'), {
+                            type: 'bar',
+                            data: {
+                                labels: labels,
+                                datasets: datasets
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: { position: 'top', labels: { font: { size: 12, family: 'Cairo' } } },
+                                    datalabels: {
+                                        display: true,
+                                        color: '#222',
+                                        font: {weight:'bold',size:10, family: 'Cairo'},
+                                        anchor: 'end',
+                                        align: 'top',
+                                        formatter: (value) => value > 0 ? value : '' // Only show label if value > 0
+                                    }
+                                },
+                                scales: {
+                                    y: { beginAtZero: true, ticks: { font: { size: 11, family: 'Cairo' }, color: '#555'} },
+                                    x: { ticks: { font: { size: 10, family: 'Cairo' }, color: '#555'} }
+                                }
+                            },
+                            plugins: [ChartDataLabels]
+                        });
+                        currentChartInstances.push(newChart); // Store the instance
+                    }
+                }
             });
-            console.log("Charts rendered."); // Debug log
         }
+
         function printChartReport() {
-            console.log("printChartReport called."); // Debug log
             let w = window.open('', '', 'width=900,height=900');
-            w.document.write('<style>@import url("https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap"); body { font-family: "Cairo", sans-serif; direction: rtl; }</style>');
-            w.document.write('<h2 style="font-size:20px; text-align: center; color:var(--accent-blue); margin-top: 20px;">تقرير الرسوم البيانية للمنشآت</h2>');
-            $('#charts-container canvas').each(function(){
-                w.document.write('<div style="margin-bottom:30px; page-break-inside: avoid;"><img src="' + this.toDataURL() + '" style="max-width:95vw; border: 1px solid #ddd; padding: 5px; background: #fff;"/></div>');
+            w.document.write('<style>');
+            w.document.write('@import url("https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap");');
+            w.document.write('body { font-family: "Cairo", sans-serif; direction: rtl; margin: 20px; }');
+            w.document.write('h2 { font-size:20px; text-align: center; color:#4CAF50; margin-top: 20px; }'); // Corporate Green
+            w.document.write('h4 { font-size:16px; margin-top:20px; margin-bottom:10px; border-bottom: 1px solid #eee; padding-bottom: 5px; }');
+            w.document.write('div.chart-item { margin-bottom:30px; page-break-inside: avoid; text-align: center; }');
+            w.document.write('div.chart-item img { max-width:95vw; border: 1px solid #ddd; padding: 5px; background: #fff; display: block; margin: 0 auto;}');
+            w.document.write('</style>');
+            w.document.write('<h2 style="font-size:20px; text-align: center; color:#4CAF50; margin-top: 20px;">تقرير الرسوم البيانية للمنشآت</h2>'); // Corporate Green
+
+            $('#charts-container canvas').each(function(index){
+                const imgData = this.toDataURL('image/png'); // Get image data
+                // Get the title associated with this chart (assuming it's the previous h4)
+                const chartTitle = $(this).closest('div').find('h4').text() || `Chart ${index + 1}`;
+                w.document.write(`<div class="chart-item"><h4>${chartTitle}</h4><img src="${imgData}" /></div>`);
             });
-            setTimeout(()=>{
-                console.log("Calling window.print() for chart report."); // Debug log
+
+            w.document.close(); // Close the document before printing
+            w.focus(); // Focus on the new window
+            // Wait for images to load if any, then print
+            const images = w.document.querySelectorAll('img');
+            if (images.length > 0) {
+                let imagesLoaded = 0;
+                images.forEach(img => {
+                    if (img.complete) {
+                        imagesLoaded++;
+                    } else {
+                        img.onload = () => {
+                            imagesLoaded++;
+                            if (imagesLoaded === images.length) {
+                                w.print();
+                                w.close();
+                            }
+                        };
+                    }
+                });
+                if (imagesLoaded === images.length) {
+                    w.print();
+                    w.close();
+                }
+            } else {
                 w.print();
-            }, 400);
-        }
-        function printAllFilteredRecords() {
-            console.log("printAllFilteredRecords called."); // Debug log
-            if (!filteredRecords.length) {
-                showNotification("لا توجد بيانات (مفلترة) للطباعة.", 'error');
-                console.warn("No filtered records to print."); // Debug log
-                return;
+                w.close();
             }
+        }
+
+        function printAllFilteredRecords() {
+            if (!filteredRecords.length) { showNotification("لا توجد بيانات (مفلترة) للطباعة.", 'error'); return; }
+
+            let headersMap = {
+                "license_no": "رقم الرخصة",
+                "facility_name": "اسم الموقع",
+                "area": "المنطقة",
+                "activity_type": "النشاط",
+                "unit": "الوحدة",
+                "latest_Inspectiondate": "آخر زيارة تفتيش",
+                "latest_Action": "الإجراء",
+                "latest_InspectorID": "رقم المفتش"
+            };
+
+            const columnsToPrint = [
+                "license_no",
+                "facility_name",
+                "area",
+                "activity_type",
+                "unit",
+                "latest_Inspectiondate",
+                "latest_Action",
+                "latest_InspectorID"
+            ];
+
+            let tableHeadersHtml = columnsToPrint.map(col => `<th>${headersMap[col]}</th>`).join('');
+
+            let tableRowsHtml = filteredRecords.map((record, index) => {
+                let rowHtml = `<tr><td>${index + 1}</td>`; // Add index column
+                columnsToPrint.forEach(col => {
+                    let cellValue = record[col] || '';
+                    let cellStyle = '';
+                    if (col === 'latest_Action') {
+                        let bgColor = getActionColor(cellValue);
+                        cellStyle = `style="background:${bgColor};color:#fff;font-weight:bold;"`;
+                    }
+                    rowHtml += `<td ${cellStyle}>${cellValue}</td>`;
+                });
+                rowHtml += '</tr>';
+                return rowHtml;
+            }).join('');
+
+
             let printContent = `
                 <div class="report-header">
                     <img src="shjmunlogo.png" alt="شعار بلدية الشارقة" />
@@ -917,59 +1109,43 @@
                     <thead>
                         <tr>
                             <th>#</th>
-                            <th>اسم المنشأة</th>
-                            <th>المنطقة</th>
-                            <th>النشاط</th>
-                            <th>الإجراء</th>
-                            <th>تاريخ آخر تفتيش</th>
-                            <th>رقم الرخصة</th>
-                            <th>جهة الإصدار</th>
-                            <th>نوع الرخصة</th>
-                            <th>حالة المنشأة</th>
-                            <th>الوحدة</th>
-                            <th>SHJHSP</th>
-                            <th>درجة الخطورة</th>
+                            ${tableHeadersHtml}
                         </tr>
                     </thead>
                     <tbody>
+                        ${tableRowsHtml}
+                    </tbody>
+                </table>
             `;
-            filteredRecords.forEach((record, index) => {
-                // لون الإجراء حسب الأولوية
-                let bgAction = getActionColor(record.latest_Action);
-                printContent += `
-                    <tr>
-                        <td>${index + 1}</td>
-                        <td>${record.facility_name || ''}</td>
-                        <td>${record.area || ''}</td>
-                        <td>${record.activity_type || ''}</td>
-                        <td style="background:${bgAction};color:#fff;font-weight:bold;">${record.latest_Action || ''}</td>
-                        <td>${record.latest_Inspectiondate || ''}</td>
-                        <td>${record.license_no || ''}</td>
-                        <td>${record.LicenseIssuing || ''}</td>
-                        <td>${record.ltype || ''}</td>
-                        <td>${record.facility_status || ''}</td>
-                        <td>${record.unit || ''}</td>
-                        <td>${record.shjhsp || ''}</td>
-                        <td>${record.hazard_class || ''}</td>
-                    </tr>
-                `;
-            });
-            printContent += '</tbody></table>';
-            const printArea = document.getElementById('print-area');
-            printArea.innerHTML = printContent;
-            console.log("Generated print content and set to print-area."); // Debug log
-            window.print();
-            console.log("window.print() called for data report."); // Debug log
+            const printWindow = window.open('', '_blank');
+            printWindow.document.write('<!DOCTYPE html><html><head><title>تقرير بيانات المنشآت</title>');
+            printWindow.document.write('<style>');
+            printWindow.document.write('@import url("https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap");');
+            printWindow.document.write('body { font-family: "Cairo", sans-serif; direction: rtl; margin: 20px; font-size: 13px; }');
+            printWindow.document.write('.report-header { display: flex; align-items: center; gap: 20px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px; }');
+            printWindow.document.write('.report-header img { width: 60px; height: 60px; margin-left: 15px; }');
+            printWindow.document.write('.report-title { font-size: 20px; color: #4CAF50; margin: 0 0 5px 0; font-weight: bold; }');
+            printWindow.document.write('.report-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 12px; background: #fff; table-layout: fixed;}'); /* Added table-layout: fixed */
+            printWindow.document.write('.report-table th, .report-table td { border: 1px solid #d0d0d0; padding: 5px 8px; text-align: right; word-break: break-all;}'); /* Added word-break: break-all */
+            printWindow.document.write('.report-table th { background: #e9ecef; font-weight: bold; color: #444; }');
+            printWindow.document.write('@page { size: A4 landscape; margin: 10mm; }'); /* Landscape for wide tables */
+            printWindow.document.write('</style></head><body>');
+            printWindow.document.write(printContent);
+            printWindow.document.write('</body></html>');
+            printWindow.document.close();
+            printWindow.focus(); // Important for printing
+            printWindow.print();
+            // printWindow.close(); // Usually commented out for user to control closing
         }
+
         function sendWhatsApp(recordId) {
-            console.log("sendWhatsApp called for ID:", recordId); // Debug log
             const record = allRecords.find(r => r.facility_ID == recordId);
             if (!record) {
                 showNotification('لم يتم العثور على السجل لإرساله عبر واتساب.', 'error');
                 return;
             }
             const coords = record.site_coordinates ? record.site_coordinates.split(',').map(Number) : [null, null];
-            const googleMapsLink = (coords[0] && coords[1]) ? `https://www.google.com/maps/search/?api=1&query=$${coords[0]},${coords[1]}` : 'لا يوجد إحداثيات';
+            const googleMapsLink = (coords[0] && coords[1]) ? `https://www.google.com/maps/search/?api=1&query=${coords[0]},${coords[1]}` : 'لا يوجد إحداثيات'; // Corrected Google Maps URL
             const text = encodeURIComponent(`
 *تفاصيل المنشأة:*
 - *الاسم:* ${record.facility_name || 'غير متوفر'}
@@ -982,27 +1158,27 @@
             window.open(`https://wa.me/?text=${text}`, '_blank');
             showNotification('تم فتح تطبيق واتساب لمشاركة البيانات.', 'success');
         }
+
         function sendEmail(recordId) {
-            console.log("sendEmail called for ID:", recordId); // Debug log
             const record = allRecords.find(r => r.facility_ID == recordId);
             if (!record) { showNotification('لم يتم العثور على السجل لإرساله عبر البريد الإلكتروني.', 'error'); return; }
             const subject = encodeURIComponent(`معلومات منشأة: ${record.facility_name || 'غير متوفر'}`);
             const coords = record.site_coordinates ? record.site_coordinates.split(',').map(Number) : [null, null];
-            const googleMapsLink = (coords[0] && coords[1]) ? `https://www.google.com/maps/search/?api=1&query=$${coords[0]},${coords[1]}` : 'لا يوجد إحداثيات';
+            const googleMapsLink = (coords[0] && coords[1]) ? `https://www.google.com/maps/search/?api=1&query=${coords[0]},${coords[1]}` : 'لا يوجد إحداثيات'; // Corrected Google Maps URL
             const body = encodeURIComponent(`
-*تفاصيل المنشأة:*
-- *الاسم:* ${record.facility_name || 'غير متوفر'}
-- *الرخصة:* ${record.license_no || 'غير متوفر'}
-- *المنطقة:* ${record.area || 'غير متوفر'}
-- *النشاط:* ${record.activity_type || 'غير متوفر'}
-- *آخر إجراء:* ${record.latest_Action || 'لا يوجد'}
-- *رابط الموقع:* ${googleMapsLink}
+تفاصيل المنشأة:
+- الاسم: ${record.facility_name || 'غير متوفر'}
+- الرخصة: ${record.license_no || 'غير متوفر'}
+- المنطقة: ${record.area || 'غير متوفر'}
+- النشاط: ${record.activity_type || 'غير متوفر'}
+- آخر إجراء: ${record.latest_Action || 'لا يوجد'}
+- رابط الموقع: ${googleMapsLink}
 `);
             window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
             showNotification('تم فتح تطبيق البريد الإلكتروني لمشاركة البيانات.', 'success');
         }
+
         function openLocation(recordId) {
-            console.log("openLocation called for ID:", recordId); // Debug log
             const record = allRecords.find(r => r.facility_ID == recordId);
             if (!record || !record.site_coordinates) {
                 showNotification('لا توجد إحداثيات متاحة لهذه المنشأة.', 'error');
@@ -1010,18 +1186,17 @@
             }
             const coords = record.site_coordinates.split(',').map(Number);
             if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
-                const url = `https://www.google.com/maps/search/?api=1&query=$${coords[0]},${coords[1]}`;
+                const url = `https://www.google.com/maps/search/?api=1&query=${coords[0]},${coords[1]}`; // Corrected Google Maps URL
                 window.open(url, '_blank');
                 showNotification('تم فتح الموقع الجغرافي في خرائط جوجل.', 'success');
             } else {
                 showNotification('الإحداثيات غير صالحة لهذه المنشأة.', 'error');
             }
         }
+
         function exportExcel() {
-            console.log("exportExcel called."); // Debug log
             if (!filteredRecords.length) {
                 showNotification("لا توجد بيانات (مفلترة) للتصدير!", 'error');
-                console.warn("No filtered records to export."); // Debug log
                 return;
             }
             const headers = [
@@ -1066,256 +1241,281 @@
             XLSX.utils.book_append_sheet(wb, ws, "بيانات_المنشآت_المفلترة");
             XLSX.writeFile(wb, "بيانات_المنشآت_المفلترة.xlsx");
             showNotification('تم تصدير البيانات بنجاح إلى ملف Excel.', 'success');
-            console.log("Data exported to Excel."); // Debug log
         }
+
         function openNewEstablishmentForm() {
-            console.log("openNewEstablishmentForm called."); // Debug log
             window.open('form_establishment.html', '_blank');
             showNotification('جارٍ فتح نموذج إضافة منشأة جديدة.', 'info');
         }
+
         function openEditEstablishmentForm(unique_id) {
-            console.log("openEditEstablishmentForm called for ID:", unique_id); // Debug log
             window.open(`form_establishment.html?unique_id=${unique_id}`, '_blank');
             showNotification('جارٍ فتح نموذج تعديل بيانات المنشأة.', 'info');
         }
+
         function openAddEditInspectionForm(unique_id) {
-            console.log("openAddEditInspectionForm called for ID:", unique_id); // Debug log
             window.open(`inspection_form.html?facility_unq_id=${unique_id}`, '_blank');
             showNotification('جارٍ فتح نموذج إضافة/تعديل زيارة تفتيش.', 'info');
         }
+
         function deleteEstablishment(unique_id) {
-            console.log("deleteEstablishment called for ID:", unique_id); // Debug log
             if (!confirm('هل أنت متأكد من حذف المنشأة؟ لا يمكن التراجع عن هذا الإجراء.')) return;
+            // Optimistically remove from client-side array
             allRecords = allRecords.filter(r => r.facility_unq_id != unique_id);
-            filterPoints();
+            filterPoints(); // Re-render map and filters
             $('#info').hide();
             showNotification('تم حذف المنشأة بنجاح.', 'success');
-            console.log("Establishment deleted from local records."); // Debug log
             // In a real application, you would also send a request to a backend to delete the record from the database.
+            // Example: fetch('delete_establishment.php', { method: 'POST', body: JSON.stringify({ unique_id: unique_id }) })
+            // .then(response => response.json())
+            // .then(data => { if (data.success) { showNotification('تم حذف المنشأة بنجاح.', 'success'); } else { showNotification('فشل حذف المنشأة: ' + data.msg, 'error'); } })
+            // .catch(error => showNotification('خطأ في الاتصال بالخادم لحذف المنشأة: ' + error.message, 'error'));
+        }
+
+        // Password prompt function
+        function promptForPassword(callback) {
+            const password = prompt("الرجاء إدخال كلمة المرور:");
+            if (password === ADMIN_PASSWORD) {
+                callback();
+            } else {
+                showNotification("كلمة المرور غير صحيحة.", "error");
+            }
         }
 
         // Notification function (non-interactive)
         function showNotification(message, type = 'info', duration = 3000) {
-            console.log(`Displaying notification: Type: ${type}, Message: ${message}`); // Debug log
             const notification = $('#notification-popup');
             notification.empty(); // Clear content for non-interactive
             notification.text(message);
-            notification.removeClass('success error info').addClass(type).addClass('show');
-            setTimeout(() => {
+            notification.removeClass('success error info interactive').addClass(type).addClass('show'); // Remove interactive class
+            clearTimeout(notification.data('timeout')); // Clear any existing timeout
+
+            const timeoutId = setTimeout(() => {
                 notification.removeClass('show');
             }, duration);
+            notification.data('timeout', timeoutId); // Store timeout ID
         }
 
-        // Interactive Notification function
-        function showInteractiveNotification(message, confirmCallback, cancelCallback = null, duration = 15000) { // Increased duration for interactive
-            console.log("Displaying interactive notification."); // Debug log
-            const notification = $('#notification-popup');
-            notification.empty(); // Clear previous content
-            notification.append(`<div style="margin-bottom: 10px;">${message}</div>`);
+// Notification function (non-interactive)
+function showNotification(message, type = 'info', duration = 3000) {
+    const notification = $('#notification-popup');
+    notification.empty();
+    notification.text(message);
+    notification.removeClass('success error info interactive').addClass(type).addClass('show');
+    clearTimeout(notification.data('timeout'));
 
-            const buttonContainer = $('<div style="display: flex; justify-content: center; gap: 10px;"></div>');
-            const confirmBtn = $('<button style="background-color: var(--primary-green); color: var(--text-light); border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer;">متابعة</button>');
-            const cancelBtn = $('<button style="background-color: #6c757d; color: var(--text-light); border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer;">إلغاء</button>');
+    const timeoutId = setTimeout(() => {
+        notification.removeClass('show');
+    }, duration);
+    notification.data('timeout', timeoutId);
+}
 
-            confirmBtn.on('click', () => {
-                console.log("Interactive notification: Confirm clicked."); // Debug log
-                notification.removeClass('show');
-                if (confirmCallback) confirmCallback();
-            });
+// Haversine formula to calculate distance between two points on Earth (in meters)
+function getDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371e3; // metres
+    const φ1 = lat1 * Math.PI / 180;
+    const φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lon2 - lon1) * Math.PI / 180;
 
-            cancelBtn.on('click', () => {
-                console.log("Interactive notification: Cancel clicked."); // Debug log
-                notification.removeClass('show');
-                if (cancelCallback) cancelCallback();
-            });
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-            buttonContainer.append(confirmBtn);
-            buttonContainer.append(cancelBtn); 
-            notification.append(buttonContainer);
+    return R * c;
+}
 
-            notification.removeClass('success error info').addClass('info').addClass('show');
-            
-            // Auto-dismiss after duration if no interaction
-            setTimeout(() => {
-                if (notification.hasClass('show')) {
-                    console.log("Interactive notification auto-dismissed."); // Debug log
-                    notification.removeClass('show');
-                }
-            }, duration);
-        }
+// Function to calculate driving/walking time in minutes
+function getDrivingTimeInMinutes(distanceMeters) {
+    const mode = document.getElementById("mode").value;
+    let speedMetersPerMinute;
 
-        // Function to request notification permission
-        function requestNotificationPermission() {
-            console.log("requestNotificationPermission called."); // Debug log
-            if (!("Notification" in window)) {
-                console.warn("This browser does not support desktop notification");
-                showNotification('متصفحك لا يدعم الإشعارات.', 'error');
-            } else if (Notification.permission === "granted") {
-                console.log("Notification permission already granted.");
-                // No need to show notification, just log
-            } else if (Notification.permission !== "denied") {
-                Notification.requestPermission().then(function (permission) {
-                    if (permission === "granted") {
-                        showNotification('تم منح إذن الإشعارات بنجاح.', 'success');
-                        console.log("Notification permission granted by user."); // Debug log
-                    } else {
-                        showNotification('تم رفض إذن الإشعارات.', 'error');
-                        console.log("Notification permission denied by user."); // Debug log
-                    }
-                });
-            } else {
-                showNotification('إذن الإشعارات ممنوع. يرجى تفعيله يدويًا من إعدادات المتصفح.', 'error', 5000);
-                console.warn("Notification permission is denied and needs manual intervention."); // Debug log
-            }
-        }
+    if (mode === 'car') {
+        const now = new Date();
+        const hour = now.getHours();
+        const minute = now.getMinutes();
+        const currentTimeInMinutes = hour * 60 + minute;
 
-        // Helper function to add days to a date string (YYYY-MM-DD)
-        function addDaysToDate(dateString, days) {
-            if (!dateString) return null;
-            const date = new Date(dateString + 'T00:00:00'); // Use T00:00:00 to avoid timezone issues
-            date.setDate(date.getDate() + days);
-            return date.toISOString().split('T')[0]; // Format back toYYYY-MM-DD
-        }
+        const isRushHour =
+            (currentTimeInMinutes >= 7 * 60 && currentTimeInMinutes <= 10 * 60) ||   // 7:00 AM to 10:00 AM
+            (currentTimeInMinutes >= 14.5 * 60 && currentTimeInMinutes <= 22 * 60);   // 2:30 PM to 10:00 PM
 
-        // Function to check nearby warnings based on WarningPeriod expiration
-        function checkNearbyWarnings() {
-            console.log("checkNearbyWarnings called."); // Debug log
-            if (Notification.permission !== "granted") {
-                showNotification('يرجى تمكين إشعارات المتصفح أولاً للتحقق من التحذيرات.', 'error', 5000);
-                requestNotificationPermission(); // Prompt for permission again
-                return;
-            }
+        speedMetersPerMinute = isRushHour ? 166.67 : 333.33;
+    } else {
+        speedMetersPerMinute = 83.33;
+    }
 
-            const today = new Date();
-            today.setHours(0, 0, 0, 0); // Normalize to start of day for comparison
-            let foundWarningThisRun = false;
+    return distanceMeters / speedMetersPerMinute;
+}
 
-            filteredRecords.forEach(point => {
-                const inspectionDateStr = point.latest_Inspectiondate;
-                const warningPeriod = parseInt(point.latest_WarningPeriod);
+// Function to check nearby warnings and populate the queue
+function checkNearbyWarnings() {
+    if (!navigator.geolocation) {
+        showNotification('المتصفح لا يدعم تحديد الموقع الجغرافي.', 'error');
+        return;
+    }
 
-                // Check if the point has an 'انذار' (warning) action
-                const actions = point.latest_Action ? point.latest_Action.split(',').map(a => a.trim()) : [];
+    warningQueue = [];
+    currentWarningIndex = 0;
+
+    navigator.geolocation.getCurrentPosition(pos => {
+        const userLat = pos.coords.latitude;
+        const userLon = pos.coords.longitude;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        filteredRecords.forEach(point => {
+            const actions = point.latest_Action ? point.latest_Action.split(',').map(a => a.trim()) : [];
+            const inspectionDateStr = point.latest_Inspectiondate;
+            const warningPeriod = parseInt(point.latest_WarningPeriod);
+
+            if (actions.includes('انذار') && inspectionDateStr && !isNaN(warningPeriod) && point.site_coordinates) {
+                const [year, month, day] = inspectionDateStr.split('-').map(Number);
+                const inspectionDate = new Date(year, month - 1, day);
                 
-                // Proceed only if it's an 'انذار', has an inspection date, and a valid warning period
-                if (actions.includes('انذار') && inspectionDateStr && !isNaN(warningPeriod)) {
-                    const triggerDateStr = addDaysToDate(inspectionDateStr, warningPeriod);
-                    const triggerDate = new Date(triggerDateStr + 'T00:00:00'); // Ensure triggerDate is also start of day
-                    
-                    console.log(`--- Checking Facility: ${point.facility_name} ---`);
-                    console.log(`  Inspection Date: ${inspectionDateStr}`);
-                    console.log(`  Warning Period: ${warningPeriod} days`);
-                    console.log(`  Calculated Trigger Date (str): ${triggerDateStr}`);
-                    console.log(`  Calculated Trigger Date (ms): ${triggerDate.getTime()}`);
-                    console.log(`  Today (ms): ${today.getTime()}`);
-                    console.log(`  Is today >= trigger date? : ${today.getTime() >= triggerDate.getTime()}`);
-                    console.log(`  Already notified? : ${notified.has(point.facility_unq_id)}`);
-                    console.log(`  Condition met (today >= trigger && !notified)? : ${today.getTime() >= triggerDate.getTime() && !notified.has(point.facility_unq_id)}`);
+                const notificationDate = new Date(inspectionDate);
+                notificationDate.setDate(inspectionDate.getDate() + warningPeriod);
+                notificationDate.setHours(0, 0, 0, 0);
 
-                    if (today.getTime() >= triggerDate.getTime() && !notified.has(point.facility_unq_id)) {
-                        foundWarningThisRun = true;
-                        const msg = `
-📍 الاسم: ${point.facility_name || 'غير متوفر'}
-📍 المنطقة: ${point.area || 'غير متوفر'}
-📄 الرخصة: ${point.license_no || 'غير متوفر'}
-📅 تاريخ آخر زيارة: ${inspectionDateStr || 'غير متوفر'}
-⚠️ انتهت فترة التحذير (${warningPeriod} أيام).
-                        `;
-                        
-                        showInteractiveNotification(msg + "<br>هل ترغب بالمتابعة الآن؟",
-                            () => { // Confirm callback
-                                if (point.site_coordinates) {
-                                    const coords = point.site_coordinates.split(',').map(Number);
-                                    if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
-                                        const mapUrl = `https://www.google.com/maps/search/?api=1&query=$${coords[0]},${coords[1]}`;
-                                        window.open(mapUrl, '_blank');
-                                        showNotification('تم فتح خرائط جوجل للمتابعة.', 'success');
-                                    } else {
-                                        showNotification('الإحداثيات غير صالحة لهذه المنشأة.', 'error');
-                                    }
-                                } else {
-                                    showNotification('لا توجد إحداثيات متاحة لهذه المنشأة.', 'error');
-                                }
-                            },
-                            () => { // Cancel callback
-                                showNotification('تم إلغاء المتابعة.', 'info');
-                            }
-                        );
-                        notified.add(point.facility_unq_id); // Add to set to prevent repeat notifications for same facility
-                    }
+                if (today >= notificationDate) {
+                    const coords = point.site_coordinates.split(',').map(Number);
+                    const pointLat = coords[0];
+                    const pointLon = coords[1];
+
+                    warningQueue.push({ 
+                        point: point, 
+                        lat: pointLat, 
+                        lon: pointLon 
+                    });
                 }
-            });
-
-            if (!foundWarningThisRun) {
-                showNotification('لا توجد تحذيرات جديدة انتهت مدتها.', 'info');
             }
-            console.log("checkNearbyWarnings finished."); // Debug log
-        }
-
-        // Keeping these functions as they might be used elsewhere or for future features,
-        // even though checkNearbyWarnings no longer uses them for its primary logic.
-        function getDistance(lat1, lon1, lat2, lon2) {
-            const R = 6371e3; // metres
-            const φ1 = lat1 * Math.PI / 180; // φ, λ in radians
-            const φ2 = lat2 * Math.PI / 180;
-            const Δφ = (lat2 - lat1) * Math.PI / 180;
-            const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-            const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-                      Math.cos(φ1) * Math.cos(φ2) *
-                      Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-            return R * c; // in meters
-        }
-
-        function getDrivingTimeInMinutes(distanceMeters) {
-            const mode = document.getElementById("mode").value;
-            let speedMetersPerMinute;
-
-            if (mode === 'car') {
-                const now = new Date();
-                const hour = now.getHours();
-                const minute = now.getMinutes();
-                const currentTimeInMinutes = hour * 60 + minute;
-
-                const isRushHour =
-                    (currentTimeInMinutes >= 7 * 60 && currentTimeInMinutes <= 10 * 60) ||   // 7:00 AM to 10:00 AM
-                    (currentTimeInMinutes >= 14.5 * 60 && currentTimeInMinutes <= 22 * 60);   // 2:30 PM to 10:00 PM
-
-                speedMetersPerMinute = isRushHour ? 166.67 : 333.33; // 10 km/h or 20 km/h
-            } else {
-                speedMetersPerMinute = 83.33; // Walking speed: 5 km/h
-            }
-
-            return distanceMeters / speedMetersPerMinute; // in minutes
-        }
-
-        $(document).ready(function() {
-            console.log("Document ready. Initializing..."); // Debug log
-            fetchAndRenderPoints();
-            $('#main-search-box').on('input', filterPoints);
-            $('#inspection-date-from, #inspection-date-to, #show-all-facilities').on('change', filterPoints);
-            $('.filter-content').hide();
-            $('#charts-panel, #controls, #info').hide(); // Ensure all panels are hidden by default
-            console.log("Initial panel states set to hidden."); // Debug log
-
-            // Toggle buttons for panels using the unified showPanel function
-            $("#toggleControlsBtn").click(function(){
-                console.log("toggleControlsBtn clicked."); // Debug log
-                showPanel('controls');
-            });
-            $("#toggleChartsBtn").click(function(){
-                console.log("toggleChartsBtn clicked."); // Debug log
-                renderCharts(); // Render charts always before showing the panel
-                showPanel('charts-panel');
-            });
-            $("#toggleInfoBtn").click(function(){
-                console.log("toggleInfoBtn clicked."); // Debug log
-                showPanel('info');
-            });
-            console.log("Event listeners bound for main controls and filters."); // Debug log
         });
+
+        if (warningQueue.length > 0) {
+            displayNextWarning(userLat, userLon);
+        } else {
+            showNotification('لا توجد تحذيرات قريبة في الفترة المحددة.', 'info');
+            isNotificationsActive = false;
+            $('#triggerWarningBtn').removeClass('bell-active').find('i').removeClass('fa-bell-slash').addClass('fa-bell');
+        }
+
+    }, (error) => {
+        let errorMessage;
+        switch(error.code) {
+            case error.PERMISSION_DENIED:
+                errorMessage = "تم رفض طلب تحديد الموقع الجغرافي.";
+                break;
+            case error.POSITION_UNAVAILABLE:
+                errorMessage = "معلومات الموقع غير متوفرة.";
+                break;
+            case error.TIMEOUT:
+                errorMessage = "انتهت مهلة طلب تحديد الموقع الجغرافي.";
+                break;
+            default:
+                errorMessage = "حدث خطأ غير معروف أثناء تحديد الموقع.";
+                break;
+        }
+        showNotification('خطأ في تحديد الموقع: ' + errorMessage, 'error');
+        isNotificationsActive = false;
+        $('#triggerWarningBtn').removeClass('bell-active').find('i').removeClass('fa-bell-slash').addClass('fa-bell');
+    }, {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 0
+    });
+}
+
+// Function to display the next warning from the queue
+function displayNextWarning(userLat, userLon) {
+    if (!isNotificationsActive) {
+        $('#notification-popup').removeClass('show');
+        return;
+    }
+
+    if (currentWarningIndex < warningQueue.length) {
+        const warning = warningQueue[currentWarningIndex];
+        
+        // حساب المسافة وزمن الوصول في الوقت الفعلي
+        const distance = getDistance(userLat, userLon, warning.lat, warning.lon);
+        const time = getDrivingTimeInMinutes(distance);
+        
+        const msg = `
+تحذير! منشأة قريبة:
+📍 الاسم: ${warning.point.facility_name || 'غير متوفر'}
+📍 المنطقة: ${warning.point.area || 'غير متوفر'}
+📄 الرخصة: ${warning.point.license_no || 'غير متوفر'}
+📅 آخر زيارة: ${warning.point.latest_Inspectiondate || 'غير متوفر'}
+📏 المسافة: ${(distance/1000).toFixed(1)} كم
+⏳ الزمن المتوقع للوصول: ${Math.round(time)} دقيقة
+        `;
+        
+        const notification = $('#notification-popup');
+        notification.empty();
+        notification.append(`<div style="margin-bottom: 10px; font-weight: bold;">${msg}</div>`);
+
+        const buttonContainer = $('<div style="display: flex; justify-content: center; gap: 10px;"></div>');
+        const confirmBtn = $('<button>متابعة</button>');
+        const cancelBtn = $('<button class="cancel">إلغاء</button>');
+
+        confirmBtn.on('click', () => {
+            notification.removeClass('show');
+            const mapUrl = `https://www.google.com/maps/search/?api=1&query=${warning.lat},${warning.lon}`;
+            window.open(mapUrl, '_blank');
+            setTimeout(() => {
+                displayNextWarning(userLat, userLon);
+            }, 1000);
+        });
+
+        cancelBtn.on('click', () => {
+            notification.removeClass('show');
+            setTimeout(() => {
+                displayNextWarning(userLat, userLon);
+            }, 1000);
+        });
+
+        buttonContainer.append(confirmBtn);
+        buttonContainer.append(cancelBtn);
+        notification.append(buttonContainer);
+
+        notification.removeClass('success error info').addClass('interactive').addClass('show');
+        currentWarningIndex++;
+    } else {
+        showNotification('تم عرض جميع التحذيرات القريبة.', 'info');
+        isNotificationsActive = false;
+        $('#triggerWarningBtn').removeClass('bell-active').find('i').removeClass('fa-bell-slash').addClass('fa-bell');
+    }
+}
+
+// Initialize the application
+$(document).ready(function() {
+    fetchAndRenderPoints();
+    
+    // Event listeners
+    $('#main-search-box').on('input', filterPoints);
+    $('#inspection-date-from, #inspection-date-to, #show-all-facilities').on('change', filterPoints);
+    
+    // Panel toggle buttons
+    $("#toggleControlsBtn").click(() => showPanel('controls'));
+    $("#toggleChartsBtn").click(() => showPanel('charts-panel'));
+    $("#toggleInfoBtn").click(() => showPanel('info'));
+    
+    // Toggle notifications
+    $("#triggerWarningBtn").click(function(){
+        if (isNotificationsActive) {
+            isNotificationsActive = false;
+            warningQueue = [];
+            currentWarningIndex = 0;
+            $('#notification-popup').removeClass('show');
+            $(this).removeClass('bell-active').find('i').removeClass('fa-bell-slash').addClass('fa-bell');
+            showNotification('تم إيقاف التحذيرات.', 'info');
+        } else {
+            isNotificationsActive = true;
+            $(this).addClass('bell-active').find('i').removeClass('fa-bell').addClass('fa-bell-slash');
+            checkNearbyWarnings();
+        }
+    });
+});
     </script>
 </body>
 </html>
