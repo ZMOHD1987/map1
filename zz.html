@@ -1,2102 +1,1321 @@
-<?php
-// inspection.php
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
-
-// معلومات اتصال قاعدة البيانات (تم نقلها مباشرة هنا لضمان وجودها)
-// يرجى تحديث هذه القيم بمعلومات قاعدة البيانات الخاصة بك
-$host = "sql113.infinityfree.com"; 
-$user = "if0_39269674"; 
-$pass = "Mohd28332"; 
-$db   = "if0_39269674_einspection_db"; 
-
-// إنشاء اتصال بقاعدة البيانات
-$conn = new mysqli($host, $user, $pass, $db);
-
-// التحقق من وجود أخطاء في الاتصال
-if ($conn->connect_error) {
-    // إرسال استجابة JSON في حالة وجود خطأ في الاتصال (للطلبات AJAX)
-    if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
-        header('Content-Type: application/json; charset=utf-8');
-        echo json_encode(['status' => 'error', 'message' => 'فشل الاتصال بقاعدة البيانات: ' . $conn->connect_error]);
-        exit;
-    } else {
-        // رسالة خطأ للمتصفح إذا لم يكن طلب AJAX
-        die("فشل الاتصال بقاعدة البيانات: " . $conn->connect_error);
-    }
-}
-
-// تعيين رأس المحتوى لـ JSON إذا كان الطلب AJAX
-if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
-    header('Content-Type: application/json; charset=utf-8');
-
-    $action = $_GET['action'] ?? $_POST['action'] ?? '';
-
-    // وظيفة جلب سجلات التفتيش مع Pagination والفلاتر (للجدول السفلي)
-    if ($action === 'list_paginated' || $action === 'list_all_for_print') {
-        $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 50;
-        $offset = isset($_GET['offset']) ? (int)$_GET['offset'] : 0;
-        $getAll = ($action === 'list_all_for_print'); // تحديد ما إذا كان يجب جلب كل السجلات
-
-        // حقل البحث الشامل
-        $generalSearch = $_GET['generalSearch'] ?? '';
-
-        // فلاتر التاريخ (بقيت منفصلة)
-        $filterDateContractStart = $_GET['filterDateContractStart'] ?? '';
-        $filterDateContractEnd = $_GET['filterDateContractEnd'] ?? '';
-        $filterStudyDateStart = $_GET['filterStudyDateStart'] ?? '';
-        $filterStudyDateEnd = $_GET['filterStudyDateEnd'] ?? '';
-
-        $where = [];
-        $params = [];
-        $types = "";
-
-        // دمج حقول البحث العامة في شرط واحد
-        if ($generalSearch) {
-            $searchTerm = "%" . $generalSearch . "%";
-            $where[] = "(r.LicID LIKE ? OR e.Facilityname LIKE ? OR e.AREA LIKE ? OR e.Activity LIKE ? OR r.Typeofstudy LIKE ? OR r.DurationStudy LIKE ? OR r.Nots LIKE ?)";
-            $params[] = $searchTerm;
-            $params[] = $searchTerm;
-            $params[] = $searchTerm;
-            $params[] = $searchTerm;
-            $params[] = $searchTerm;
-            $params[] = $searchTerm;
-            $params[] = $searchTerm;
-            $types .= "sssssss"; // 7 's' for 7 parameters
-        }
-
-        // إضافة فلاتر التاريخ بشكل منفصل (بشرط AND)
-        if ($filterDateContractStart) {
-            $where[] = "r.DateContract >= ?";
-            $params[] = $filterDateContractStart;
-            $types .= "s";
-        }
-        if ($filterDateContractEnd) {
-            $where[] = "r.DateContract <= ?";
-            $params[] = $filterDateContractEnd;
-            $types .= "s";
-        }
-        if ($filterStudyDateStart) {
-            $where[] = "r.StudyDate >= ?";
-            $params[] = $filterStudyDateStart;
-            $types .= "s";
-        }
-        if ($filterStudyDateEnd) {
-            $where[] = "r.StudyDate <= ?";
-            $params[] = $filterStudyDateEnd;
-            $types .= "s";
-        }
-
-        $where_clause = '';
-        if (!empty($where)) {
-            $where_clause = " WHERE " . implode(" AND ", $where);
-        }
-
-        // جلب عدد السجلات الإجمالي فقط إذا لم يكن طلب جلب الكل للطباعة
-        $total_records = 0;
-        if (!$getAll) {
-            $count_sql = "SELECT COUNT(*) AS total_records 
-                          FROM TblRegistration r
-                          LEFT JOIN TblEstablishmente e ON r.LicID = e.LicenseID" . $where_clause;
-            
-            $stmt_count = $conn->prepare($count_sql);
-            if (!$stmt_count) {
-                 echo json_encode(['status' => 'error', 'message' => 'خطأ في تحضير استعلام العدد: ' . $conn->error]);
-                 exit;
-            }
-            if (!empty($params)) {
-                // استخدام splat operator (...) لتمرير عناصر المصفوفة كمعاملات فردية
-                $stmt_count->bind_param($types, ...$params); 
-            }
-            $stmt_count->execute();
-            $total_records = $stmt_count->get_result()->fetch_assoc()['total_records'];
-            $stmt_count->close();
-        }
-
-        // جلب السجلات للصفحة الحالية أو جميعها للطباعة
-        $data_sql = "SELECT r.*, e.Facilityname, e.AREA, e.Activity, e.SiteCoordinates 
-                     FROM TblRegistration r
-                     LEFT JOIN TblEstablishmente e ON r.LicID = e.LicenseID"
-                     . $where_clause . " ORDER BY r.LicID ASC, r.StudyDate DESC, r.DateContract DESC";
-        
-        if (!$getAll) { // إضافة LIMIT و OFFSET فقط إذا لم يكن طلب جلب الكل
-            $data_sql .= " LIMIT ? OFFSET ?";
-        }
-
-        $stmt_data = $conn->prepare($data_sql);
-        if (!$stmt_data) {
-             echo json_encode(['status' => 'error', 'message' => 'خطأ في تحضير استعلام البيانات: ' . $conn->error]);
-             exit;
-        }
-
-        $current_params = $params;
-        $current_types = $types;
-
-        if (!$getAll) {
-            $current_params[] = $limit;
-            $current_params[] = $offset;
-            $current_types .= "ii";
-        }
-        
-        if (!empty($current_params)) {
-            $stmt_data->bind_param($current_types, ...$current_params);
-        }
-        
-        $stmt_data->execute();
-        $result = $stmt_data->get_result();
-        $rows = [];
-        while ($row = $result->fetch_assoc()) {
-            $rows[] = $row;
-        }
-        $stmt_data->close();
-
-        echo json_encode(['records' => $rows, 'totalRecords' => $total_records]);
-        exit;
-    }
-
-    // وظيفة جلب سجل تفتيش محدد (لنموذج الإدخال العلوي عند التعديل من الجدول أو البحث برقم الرخصة)
-    // هذا سيعود بآخر سجل تفتيش إذا لم يتم توفير DateContract و StudyDate
-    if ($action === 'get_record_for_form') {
-        $LicID = $_GET['LicID'] ?? '';
-        $DateContract = $_GET['DateContract'] ?? ''; 
-        $StudyDate = $_GET['StudyDate'] ?? '';       
-
-        if (!$LicID) {
-            echo json_encode(['status' => 'error', 'message' => 'رقم الرخصة مطلوب لجلب سجل محدد.']);
-            exit;
-        }
-
-        $sql = "SELECT r.*, e.Facilityname, e.AREA, e.Activity, e.SiteCoordinates 
-                FROM TblRegistration r
-                LEFT JOIN TblEstablishmente e ON r.LicID = e.LicenseID 
-                WHERE r.LicID = ?";
-        
-        $params = [$LicID];
-        $types = "s";
-
-        // إذا تم توفير DateContract و StudyDate، استخدمها لتحديد سجل تفتيش معين
-        if ($DateContract && $StudyDate) {
-            $sql .= " AND r.DateContract = ? AND r.StudyDate = ?";
-            $params[] = $DateContract;
-            $params[] = $StudyDate;
-            $types .= "ss";
-        } else {
-            // وإلا، جلب أحدث سجل تفتيش لهذا الـ LicID (هذا هو السلوك السابق الذي يسبب المشكلة)
-            $sql .= " ORDER BY r.StudyDate DESC, r.DateContract DESC LIMIT 1";
-        }
-
-        $stmt = $conn->prepare($sql);
-        if (!$stmt) {
-             echo json_encode(['status' => 'error', 'message' => 'خطأ في تحضير استعلام جلب سجل النموذج: ' . $conn->error]);
-             exit;
-        }
-        $stmt->bind_param($types, ...$params);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $record = $result->fetch_assoc();
-        $stmt->close();
-        
-        echo json_encode($record ?? null);
-        exit;
-    }
-
-    // وظيفة جلب بيانات المنشأة فقط (عند كتابة LicID جديد في النموذج العلوي أو عند عدم وجود سجلات تفتيش)
-    if ($action === 'get_facility_data_only') {
-        $LicID = $_GET['LicID'] ?? '';
-        if (empty($LicID)) {
-            echo json_encode(null); // لا توجد بيانات لإرجاعها
-            exit;
-        }
-        $stmt = $conn->prepare("SELECT LicenseID, Facilityname, AREA, Activity, SiteCoordinates FROM TblEstablishmente WHERE LicenseID = ? LIMIT 1");
-        if (!$stmt) {
-             echo json_encode(['status' => 'error', 'message' => 'خطأ في تحضير استعلام جلب بيانات المنشأة: ' . $conn->error]);
-             exit;
-        }
-        $stmt->bind_param("s", $LicID);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $facility_data = $result->fetch_assoc();
-        $stmt->close();
-        echo json_encode($facility_data ?? null);
-        exit;
-    }
-
-    // وظيفة جلب جميع أرقام الرخص (للتنقل العلوي)
-    if ($action === 'get_all_licids') {
-        // جلب LicIDs من TblRegistration (فقط تلك التي لديها سجلات تفتيش)
-        // أو يمكنك جلبها من TblEstablishmente إذا كنت تريد كل الرخص حتى لو لم يكن لديها سجلات تفتيش
-        $stmt = $conn->prepare("SELECT DISTINCT LicID FROM TblRegistration ORDER BY LicID ASC"); // أو SELECT LicenseID FROM TblEstablishmente
-        if (!$stmt) {
-            echo json_encode(['status' => 'error', 'message' => 'خطأ في تحضير استعلام جلب جميع أرقام الرخص: ' . $conn->error]);
-            exit;
-        }
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $licIDs = [];
-        while ($row = $result->fetch_assoc()) {
-            $licIDs[] = $row['LicID'];
-        }
-        $stmt->close();
-        echo json_encode(['status' => 'success', 'licIDs' => $licIDs]);
-        exit;
-    }
-    
-    // وظيفة إضافة / تحديث سجل تفتيش
-    if ($action === 'save_record') {
-        $originalLicID        = $_POST['originalLicID'] ?? ''; // LicID الأصلي للسجل الذي يتم تعديله
-        $originalDateContract = $_POST['originalDateContract'] ?? ''; // تاريخ العقد الأصلي
-        $originalStudyDate    = $_POST['originalStudyDate'] ?? '';    // تاريخ الدراسة الأصلي
-
-        $LicID        = $_POST['LicID'] ?? '';
-        $DateContract = $_POST['DateContract'] ?? '';
-        $StudyDate    = $_POST['StudyDate'] ?? '';
-        $Typeofstudy  = $_POST['Typeofstudy'] ?? '';
-        $Nots         = $_POST['Nots'] ?? '';
-
-        if (!$LicID || !$DateContract || !$StudyDate || !$Typeofstudy) {
-            echo json_encode(['status' => 'error', 'message' => 'يرجى ملء كل الحقول المطلوبة.']);
-            exit;
-        }
-
-        // جلب Activity من TblEstablishmente لتحديد DurationStudy
-        $stmt = $conn->prepare("SELECT Activity FROM TblEstablishmente WHERE LicenseID = ?");
-        if (!$stmt) {
-             echo json_encode(['status' => 'error', 'message' => 'خطأ في تحضير استعلام جلب النشاط لتحديد المدة: ' . $conn->error]);
-             exit;
-        }
-        $stmt->bind_param("s", $LicID);
-        $stmt->execute();
-        $res = $stmt->get_result();
-        $activity = '';
-        if ($row = $res->fetch_assoc()) {
-            $activity = $row['Activity'] ?? ''; 
-        }
-        $DurationStudy = (is_string($activity) && trim($activity) !== "") ? "1 year" : "3 years";
-        $stmt->close();
-
-        // تحديد ما إذا كانت العملية تحديث أم إضافة
-        // إذا كانت قيم original موجودة، فهذا تحديث لسجل تفتيش محدد
-        if (!empty($originalLicID) && !empty($originalDateContract) && !empty($originalStudyDate)) {
-            // في حالة التحديث، يجب أن نستخدم المفتاح المركب (LicID, DateContract, StudyDate) للبحث
-            $stmt = $conn->prepare("UPDATE TblRegistration SET LicID=?, DateContract=?, StudyDate=?, Typeofstudy=?, DurationStudy=?, Nots=? WHERE LicID=? AND DateContract=? AND StudyDate=?");
-            if (!$stmt) {
-                echo json_encode(['status' => 'error', 'message' => 'خطأ في تحضير استعلام التحديث: ' . $conn->error]);
-                exit;
-            }
-            $stmt->bind_param("sssssssss", $LicID, $DateContract, $StudyDate, $Typeofstudy, $DurationStudy, $Nots, $originalLicID, $originalDateContract, $originalStudyDate);
-        } else {
-            // إضافة سجل جديد
-            $stmt = $conn->prepare("INSERT INTO TblRegistration (LicID, DateContract, StudyDate, Typeofstudy, DurationStudy, Nots) VALUES (?, ?, ?, ?, ?, ?)");
-            if (!$stmt) {
-                echo json_encode(['status' => 'error', 'message' => 'خطأ في تحضير استعلام الإضافة: ' . $conn->error]);
-                exit;
-            }
-            $stmt->bind_param("ssssss", $LicID, $DateContract, $StudyDate, $Typeofstudy, $DurationStudy, $Nots);
-        }
-        
-        if ($stmt->execute()) {
-            echo json_encode(['status' => 'success', 'message' => 'تم حفظ البيانات بنجاح.']);
-        } else {
-            echo json_encode(['status' => 'error', 'message' => 'فشل الحفظ: ' . $stmt->error]);
-        }
-        $stmt->close();
-        exit;
-    }
-
-    // وظيفة حذف سجل تفتيش
-    if ($action === 'delete') {
-        $LicID        = $_POST['LicID'] ?? '';
-        $DateContract = $_POST['DateContract'] ?? '';
-        $StudyDate    = $_POST['StudyDate'] ?? '';
-
-        if (empty($LicID) || empty($DateContract) || empty($StudyDate)) {
-            echo json_encode(['status' => 'error', 'message' => 'معرف السجل وتاريخ العقد وتاريخ الدراسة مطلوبة للحذف.']);
-            exit;
-        }
-
-        $stmt = $conn->prepare("DELETE FROM TblRegistration WHERE LicID=? AND DateContract=? AND StudyDate=?");
-        if (!$stmt) {
-             echo json_encode(['status' => 'error', 'message' => 'خطأ في تحضير استعلام الحذف: ' . $conn->error]);
-             exit;
-        }
-        $stmt->bind_param("sss", $LicID, $DateContract, $StudyDate);
-        
-        if ($stmt->execute()) {
-            echo json_encode(['status' => 'success', 'message' => 'تم الحذف بنجاح.']);
-        } else {
-            echo json_encode(['status' => 'error', 'message' => 'فشل الحذف: ' . $stmt->error]);
-        }
-        $stmt->close();
-        exit;
-    }
-}
-
-// الكود HTML/CSS/JavaScript لواجهة المستخدم الرئيسية
-?>
 <!DOCTYPE html>
-<html lang="ar">
+<html lang='ar' dir='rtl'>
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>إدخال بيانات الدراسات</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <meta charset='utf-8'>
+    <title>خريطة قسم رقابة الصحة العامة</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no'>
+    <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css' />
+    <link rel='stylesheet' href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css' />
+    <script src='https://cdn.jsdelivr.net/npm/chart.js'></script>
+    <script src='https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2'></script>
+    <script src='https://unpkg.com/xlsx/dist/xlsx.full.min.js'></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap');
 
-<style>
-  @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css');
+        /* Color Palette */
+        :root {
+            --primary-green: #4CAF50; /* A vibrant green */
+            --darker-green: #388E3C; /* Darker shade for hover */
+            --light-beige: #FFFDD0; /* A soft, warm beige */
+            --white: #FFFFFF;
+            --text-dark: #333;
+            --text-light: #fff;
+            --accent-blue: #1a73e8; /* Keeping a blue accent for headings/links */
+        }
 
-  :root {
-    --primary-green: #28a745;
-    --light-green: #d4edda;
-    --dark-green: #1e7e34;
-    --text-color: #333;
-    --border-color: #ced4da;
-    --input-bg: #fff;
-    --table-header-bg: #218838;
-    --table-border: #dee2e6;
-    --expired-bg: #f8d7da;
-    --expired-text: #721c24;
-    --box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.05);
-    --highlight-color: #ffeb3b; /* لون لتحديد السجل بعد البحث */
-  }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body { font-family: 'Cairo', sans-serif; background: #f8f9fa; min-height: 100vh !important; font-size: 14px; color: var(--text-dark); }
+        #map { height: 100vh; width: 100vw; min-height: 100vh; background-color: #f0f0f0; }
 
-  body {
-    font-family: 'Tajawal', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    margin: 0;
-    padding: 15px;
-    background-color: #f8f9fa;
-    color: var(--text-color);
-    line-height: 1.6;
-    direction: rtl; /* اتجاه من اليمين لليسار */
-  }
+        /* Logo Bar */
+        #logo-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1201;
+            width: 55px;
+            height: 100vh;
+            background: var(--primary-green); /* Green background */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-top: 10px;
+            border-radius: 0 15px 15px 0;
+            box-shadow: 2px 0 15px rgba(0,0,0,0.1);
+        }
+        #logo-bar img {
+            width: 42px;
+            height: 42px;
+            margin-bottom: 15px;
+        }
+        #logo-bar .logo-caption {
+            font-size: 12px; font-weight: bold; color: var(--text-light); /* White text */
+            margin-bottom: 20px; text-align: center;
+        }
+        #logo-bar .panel-toggle-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            font-size: 18px;
+            background: var(--darker-green); /* Darker green for buttons */
+            color: var(--text-light);
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            transition: background 0.2s ease, transform 0.2s ease;
+        }
+        #logo-bar .panel-toggle-btn:hover { background: var(--primary-green); transform: translateY(-2px); }
+        #logo-bar .panel-toggle-btn.active { background: var(--primary-green); }
 
-  .logo-header {
-    display: flex;
-    flex-direction: row-reverse; /* لعرض الشعار على اليمين والنص على اليسار منه في RTL */
-    align-items: center;
-    gap: 15px;
-    margin-bottom: 20px;
-    margin-top: 10px;
-    padding-right: 15px; /* يتماشى مع padding-left في RTL */
-    justify-content: flex-start; /* محاذاة الشعار والنص إلى اليمين */
-  }
+        /* Panels (Controls, Info, Charts) */
+        #controls, #info, #charts-panel {
+            position: fixed;
+            top: 15px;
+            background: var(--white); /* White background */
+            padding: 15px;
+            border-radius: 15px;
+            box-shadow: 0 5px 25px rgba(0,0,0,0.15);
+            font-size: 13px;
+            max-height: 90vh;
+            overflow-y: auto;
+            min-width: 250px;
+            width: 280px;
+            transition: left 0.3s ease, right 0.3s ease, width 0.3s ease;
+            z-index: 1050;
+            display: none;
+            border: 1px solid #e0e0e0;
+        }
+        #controls { left: 75px; max-width: 320px; }
+        #info { right: 15px; max-width: 350px; }
+        #charts-panel { left: 380px; width: 360px; max-width: 380px;}
 
-  .logo-header img {
-    height: 70px; /* حجم أكبر للشعار في الصفحة الرئيسية */
-    width: auto;
-  }
+        /* Dashboard Summary */
+        #dashboard-summary {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .dashboard-box {
+            flex: 1 0 48%;
+            background: var(--light-beige); /* Beige background */
+            border-radius: 8px;
+            text-align: center;
+            padding: 10px 5px;
+            min-width: 80px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+            border: 1px solid #d2e3fc; /* A subtle border that complements beige */
+        }
+        .dashboard-box strong { display:block; font-size:18px; color:var(--accent-blue); margin-bottom: 3px; }
+        .dashboard-box span { font-size:12px; color:var(--text-dark); }
 
-  .logo-header .text-container {
-    display: flex;
-    flex-direction: column;
-    text-align: right; /* محاذاة النص داخل الـ div لليمين */
-    font-size: 1.1em;
-    font-weight: 600;
-    color: var(--dark-green);
-  }
-  .logo-header .text-container span {
-      line-height: 1.3;
-  }
+        /* Form Elements */
+        label { display: flex; align-items: center; margin-bottom: 6px; cursor: pointer; padding: 2px 0; border-radius: 3px; }
+        label:hover { background-color: #f5f5f5; }
+        input[type='checkbox'] { margin-left: 10px; transform: scale(1.1); }
+        input[type='text'], input[type='date'], select, textarea {
+            width: calc(100% - 10px);
+            padding: 8px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+            font-size: 13px;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        input[type='text']:focus, input[type='date']:focus, select:focus, textarea:focus {
+            border-color: var(--primary-green); /* Green focus border */
+            box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2); /* Green shadow */
+            outline: none;
+        }
 
-  h2 {
-    text-align: center;
-    color: var(--primary-green);
-    margin-bottom: 25px;
-    font-size: 2.2em;
-    font-weight: 600;
-  }
+        /* Buttons */
+        button:not(.panel-toggle-btn) {
+            background-color: var(--primary-green); /* Green buttons */
+            color: var(--text-light);
+            border: none;
+            padding: 8px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            margin-bottom: 8px;
+            width: 100%;
+            text-align: center;
+            box-sizing: border-box;
+            transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        button:not(.panel-toggle-btn):hover { background-color: var(--darker-green); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
 
-  .card {
-    background-color: var(--input-bg);
-    border-radius: 8px;
-    box-shadow: var(--box-shadow);
-    padding: 20px;
-    margin-bottom: 20px;
-    max-width: 1300px; /* زيادة عرض البطاقات ليتسع للحقول الموسعة */
-    margin-left: auto;
-    margin-right: auto;
-  }
+        /* Color Dot for Filters */
+        .color-dot {
+            width: 13px; height: 13px; border-radius: 50%; display: inline-block; margin-right: 5px; border: 1px solid #888;
+            vertical-align: middle;
+        }
 
-  /* تحديثات لنموذج الإدخال الرئيسي */
-  #mainForm table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-  }
+        /* Filter Sections */
+        #controls hr { margin: 15px 0; border-color: #eee; }
+        .filter-section-header {
+            background-color: var(--primary-green); /* Green header */
+            color: var(--text-light);
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 5px;
+            font-size: 13px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.2s ease;
+        }
+        .filter-section-header:hover { background-color: var(--darker-green); }
+        .filter-content {
+            padding: 8px 10px;
+            border: 1px solid #e0e0e0;
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            margin-bottom: 10px;
+            display: none;
+            background-color: #fdfdfd;
+        }
+        .filter-content label { padding-right: 8px; padding-left: 8px; }
+        .filter-search-box { width: calc(100% - 16px); margin-bottom: 8px; font-size:12px; padding: 6px; border-radius: 4px; border: 1px solid #ddd; }
 
-  #mainForm td {
-    padding: 8px 10px;
-    border: 1px solid var(--border-color);
-    background-color: var(--input-bg);
-    vertical-align: middle;
-  }
-  
-  #mainForm tr:first-child td:first-child { border-top-right-radius: 8px; }
-  #mainForm tr:first-child td:last-child { border-top-left-radius: 8px; }
-  #mainForm tr:last-child td:first-child { border-bottom-right-radius: 8px; }
-  #mainForm tr:last-child td:last-child { border-bottom-left-radius: 8px; }
+        /* Popup Info Display */
+        .popup-info-display div { margin-bottom: 4px; }
+        .leaflet-popup-content-wrapper { border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); background: var(--white); }
+        .leaflet-popup-content { margin: 10px; max-height: 250px; overflow-y: auto; font-size: 13px;}
 
+        /* Share and Edit Buttons */
+        .share-buttons button { margin-bottom: 6px; background-color: var(--accent-blue); font-size:13px; }
+        .share-buttons button:hover { background-color: darken(var(--accent-blue), 10%); }
+        .edit-data-btn {
+            background-color: #ffc107; /* Warning yellow */
+            color: var(--text-dark);
+            padding: 8px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+            margin-top: 8px;
+            width: 100%;
+            text-align: center;
+            box-sizing: border-box;
+            border: none;
+            transition: background 0.2s ease, transform 0.2s ease;
+        }
+        .edit-data-btn:hover { background-color: #e0a800; transform: translateY(-1px); }
+        .edit-data-btn[style*="background-color: #17a2b8"] { background-color: var(--primary-green) !important; color: white; } /* Green for add inspection */
+        .edit-data-btn[style*="background-color: #17a2b8"]:hover { background-color: var(--darker-green) !important; }
+        .edit-data-btn[style*="background-color: #dc3545"] { background-color: #dc3545 !important; color: white; } /* Danger red for delete */
+        .edit-data-btn[style*="background-color: #dc3545"]:hover { background-color: #c82333 !important; }
 
-  label {
-    display: block;
-    margin-bottom: 3px;
-    font-weight: 500;
-    color: var(--dark-green);
-    font-size: 0.9em;
-  }
+        /* Charts Panel */
+        #charts-panel h3, #charts-panel h4 { font-size:15px; margin-top:10px; margin-bottom: 10px; color:var(--accent-blue); }
+        #charts-panel canvas { background:var(--white); border-radius:8px; padding: 5px; border: 1px solid #eee;}
 
-  input[type="text"],
-  input[type="date"],
-  select {
-    width: calc(100% - 20px);
-    padding: 8px;
-    border: 1px solid var(--border-color);
-    border-radius: 5px;
-    box-sizing: border-box;
-    font-size: 1em;
-    background-color: var(--input-bg);
-    transition: border-color 0.2s, box-shadow 0.2s;
-  }
+        /* Print Styles */
+        @media print {
+            body > *:not(#print-area) { display: none !important; }
+            #print-area {
+                display: block !important;
+                font-family: 'Cairo', sans-serif;
+                direction: rtl;
+                width: 100vw;
+                background: #fff !important;
+                padding: 15px 3vw;
+                box-sizing: border-box;
+            }
+            #print-area .report-header {
+                display: flex; align-items: center; gap: 20px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px;
+            }
+            #print-area .report-header img {
+                width: 60px; height: 60px; margin-left: 15px;
+            }
+            #print-area .report-title {
+                font-size: 20px; color: var(--accent-blue); margin: 0 0 5px 0; font-weight: bold;
+            }
+            #print-area .report-table {
+                width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 13px; background: #fff;
+                table-layout: auto; /* Allow column width to adjust to content */
+            }
+            #print-area .report-table th, #print-area .report-table td {
+                border: 1px solid #d0d0d0; padding: 5px 8px; text-align: right;
+            }
+            #print-area .report-table th {
+                background: #e9ecef; font-weight: bold; color: var(--text-dark);
+            }
+            #print-area .report-table tbody tr {
+                page-break-inside: avoid; /* Keep table rows together */
+            }
+            #print-area .report-table thead {
+                display: table-header-group; /* Repeat table header on each page */
+            }
+        }
 
-  input[type="text"]:focus,
-  input[type="date"]:focus,
-  select:focus {
-    border-color: var(--primary-green);
-    box-shadow: 0 0 0 0.2rem rgba(40, 167, 69, 0.25);
-    outline: none;
-  }
+        /* Responsive Adjustments */
+        @media (max-width: 900px) {
+            #controls, #info, #charts-panel {
+                left: 65px !important; right: unset !important; width: 95vw !important; max-width: 95vw;
+                border-radius: 0 0 15px 15px;
+                transform: none !important;
+                top: 10px;
+            }
+            #info { right: 10px !important; left: unset !important; }
+            #charts-panel { left: 55vw !important; width: 95vw !important; }
+            #logo-bar { width: 50px; }
+            #logo-bar img { width:38px;height:38px; }
+        }
+        @media (max-width: 600px) {
+            #controls, #info, #charts-panel {
+                left: 55px !important; right: unset !important; width: 90vw !important; max-width: 90vw !important;
+                border-radius: 0 0 12px 12px;
+                font-size: 12px !important;
+                min-height: unset !important;
+                padding: 10px;
+            }
+            #info { right: 5px !important; left: unset !important; }
+            #charts-panel { left: 50vw !important; width: 90vw !important; }
+            #map { min-height: 100vh !important; }
+            #logo-bar { width: 45px; }
+            #logo-bar img { width:32px;height:32px; }
+            .dashboard-box strong { font-size: 16px; }
+            .dashboard-box span { font-size: 11px; }
+        }
 
-  input[readonly] {
-    background-color: #e9ecef;
-    cursor: not-allowed;
-  }
-
-  button {
-    background-color: var(--primary-green);
-    color: white;
-    padding: 10px 15px;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    font-size: 1em;
-    transition: background-color 0.3s ease, transform 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    white-space: nowrap;
-  }
-
-  button:hover {
-    background-color: var(--dark-green);
-    transform: translateY(-1px);
-  }
-
-  button:active {
-    transform: translateY(0);
-  }
-
-  /* أزرار النموذج الرئيسي */
-  #mainForm .form-actions {
-      display: flex;
-      gap: 10px;
-      justify-content: flex-end;
-      margin-top: 15px;
-  }
-  #mainForm .form-actions button {
-      flex: 0 0 auto; /* لا تتمدد */
-      width: auto;
-  }
-  
-  .msg-container {
-    padding: 10px;
-    border-radius: 5px;
-    font-weight: bold;
-    text-align: center;
-    margin-top: 10px;
-  }
-  .error-msg {
-    color: #dc3545;
-    background-color: #f8d7da;
-    border: 1px solid #f5c6cb;
-  }
-  .info-msg {
-    color: #004085;
-    background-color: #cce5ff;
-    border: 1px solid #b8daff;
-  }
-  .success-msg {
-    color: #155724;
-    background-color: #d4edda;
-    border: 1px solid #c3e6cb;
-  }
-
-  .controls-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    align-items: flex-end;
-    padding: 15px;
-    background-color: var(--input-bg);
-    border-radius: 8px;
-    box-shadow: var(--box-shadow);
-    max-width: 1300px; /* زيادة عرض البطاقات */
-    margin-left: auto;
-    margin-right: auto;
-    margin-bottom: 20px;
-  }
-
-  .filter-group {
-    flex: 1 1 calc(25% - 10px);
-    min-width: 160px;
-    display: flex;
-    flex-direction: column;
-  }
-  .filter-group label { margin-bottom: 5px; }
-  .controls-container button {
-    flex: 1 1 auto;
-    min-width: 120px;
-  }
-  
-  /* فلاتر التاريخ في Controls Container */
-  .controls-container .filter-group.date-range {
-      flex: 1 1 calc(33% - 10px); /* تأخذ مساحة أكبر لمدخلين على الشاشات الكبيرة */
-      display: flex;
-      flex-direction: row; /* لعرض التاريخين بجانب بعضهما */
-      gap: 5px;
-      align-items: flex-end;
-  }
-  .controls-container .filter-group.date-range div {
-      flex: 1; /* لجعل كل مدخل يأخذ نصف المساحة */
-  }
-  .controls-container .filter-group.date-range label {
-      width: 100%; /* للتسمية فوق المدخلين */
-      text-align: right;
-  }
-
-  /* Search Navigation Group for the top form */
-  .search-navigation-group {
-    display: flex;
-    align-items: flex-end;
-    gap: 10px;
-    margin-top: 15px;
-    margin-bottom: 15px;
-    justify-content: center; /* Center the group */
-    background-color: var(--input-bg);
-    border-radius: 8px;
-    box-shadow: var(--box-shadow);
-    padding: 15px;
-    max-width: 1300px; /* زيادة عرض البطاقات */
-    margin-left: auto;
-    margin-right: auto;
-  }
-
-  .search-navigation-group .input-group {
-    display: flex;
-    flex-direction: column;
-    flex: 1; /* allow it to grow */
-    min-width: 180px; /* Minimum width for search input */
-  }
-
-  .search-navigation-group .nav-buttons {
-    display: flex;
-    gap: 5px;
-  }
-
-  .search-navigation-group button {
-    padding: 8px 12px;
-    font-size: 0.9em;
-  }
-
-
-  #recordsTableContainer {
-    overflow-x: auto; /* لتمرير الجدول أفقياً */
-    max-height: 500px; /* لتمرير الجدول عمودياً إذا كان طويلاً */
-    border-radius: 8px;
-    box-shadow: var(--box-shadow);
-  }
-
-  #recordsTable table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 0; 
-    
-  }
-
-  #recordsTable th, #recordsTable td {
-    border: 1px solid var(--table-border);
-    padding: 10px 8px;
-    text-align: center;
-    vertical-align: middle;
-    font-size: 0.9em;
-    color: var(--text-color);
-  }
-
-  #recordsTable th {
-    background-color: var(--table-header-bg);
-    color: #fff;
-    font-weight: 600;
-    position: sticky;
-    top: 0;
-    z-index: 10;
-  }
-
-  #recordsTable tbody tr:nth-child(even) {
-    background-color: #f2f2f2;
-  }
-
-  #recordsTable tbody tr:hover {
-    background-color: #e9f5ed;
-  }
-
-  .expired {
-    background-color: var(--expired-bg) !important;
-    color: var(--expired-text);
-  }
-  .expired button {
-    background-color: #ccc;
-  }
-  .expired button:hover {
-    background-color: #bbb;
-  }
-
-  /* تعطيل التعديل المباشر في الجدول */
-  td[contenteditable="true"] {
-    background-color: #fefefe;
-    transition: background-color 0.2s;
-    cursor: default; /* لتبديل شكل المؤشر */
-  }
-  td[contenteditable="true"]:focus {
-    background-color: #fefefe; /* لا يتغير عند التركيز */
-    outline: none; /* إزالة الإطار عند التركيز */
-  }
-  
-  /* تسليط الضوء على السجل بعد البحث */
-  .highlighted-row {
-    background-color: var(--highlight-color) !important;
-    transition: background-color 0.5s ease-in-out;
-    outline: 2px solid var(--primary-green);
-  }
-
-  .pagination-controls {
-      display: flex;
-      justify-content: center;
-      gap: 15px;
-      margin-top: 15px;
-      margin-bottom: 10px;
-      align-items: center;
-  }
-  .pagination-controls button {
-      padding: 8px 15px;
-      background-color: var(--primary-green);
-      color: white;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-      font-size: 0.9em;
-  }
-  .pagination-controls button:disabled {
-      background-color: #cccccc;
-      cursor: not-allowed;
-  }
-  .pagination-controls span {
-      font-weight: bold;
-      color: var(--dark-green);
-  }
-
-  /* تصميم رابط الإحداثيات */
-  .coordinates-link {
-    color: var(--primary-green);
-    text-decoration: none;
-    font-weight: bold;
-  }
-  .coordinates-link:hover {
-    text-decoration: underline;
-  }
-
-
-  @media (max-width: 1200px) { /* Adjust for larger screens */
-    #mainForm td {
-      flex: 1 1 auto; /* Allow flexibility */
-      min-width: 150px;
-    }
-    #mainForm td:nth-child(1), /* LicID */
-    #mainForm td:nth-child(2), /* Buttons */
-    #mainForm td:nth-child(3) /* Facility Name */
-    {
-        flex: 1 1 250px; /* Give more space */
-    }
-    #mainForm td:nth-child(4), /* Area */
-    #mainForm td:nth-child(5) /* Activity */
-    {
-        flex: 1 1 180px; /* Give moderate space */
-    }
-    #mainForm td:nth-child(6) /* Coordinates */
-    {
-        flex: 1 1 150px; /* Make coordinates smaller */
-    }
-    /* Second row fields */
-    #mainForm tr:nth-child(2) td {
-        flex: 1 1 150px;
-    }
-    #mainForm tr:nth-child(2) td:last-child {
-        flex: 1 1 100%; /* Buttons for the second row */
-        text-align: center;
-        margin-top: 10px;
-    }
-  }
-
-
-  @media (max-width: 992px) {
-    .filter-group {
-      flex: 1 1 calc(33% - 10px);
-    }
-    .controls-container .filter-group.date-range {
-        flex: 1 1 calc(50% - 10px);
-    }
-    .search-navigation-group {
-        flex-direction: column;
-        align-items: stretch;
-    }
-    .search-navigation-group .input-group {
-        width: 100%;
-    }
-    .search-navigation-group .nav-buttons {
-        justify-content: center;
-        width: 100%;
-    }
-
-    /* Adjust form fields for smaller screens, if they become rows */
-    #mainForm tr {
-      display: flex;
-      flex-wrap: wrap;
-    }
-    #mainForm td {
-      flex: 1 1 calc(50% - 20px); /* Two columns per row */
-      margin: 5px;
-      min-width: 150px;
-    }
-    #mainForm td:nth-child(1), /* LicID - takes full width */
-    #mainForm td:nth-child(2), /* Buttons - takes full width */
-    #mainForm td:nth-child(6) /* Coordinates - can be smaller */
-    {
-        flex: 1 1 100%; /* Take full width on smaller screens */
-    }
-
-    #mainForm .form-actions {
-        flex-direction: column;
-        gap: 10px;
-        align-items: stretch;
-    }
-    #mainForm .form-actions button {
-        width: 100%;
-    }
-  }
-
-  @media (max-width: 768px) {
-    body {
-      padding: 10px;
-    }
-    h2 {
-      font-size: 1.8em;
-    }
-    .card {
-      padding: 15px;
-      border-radius: 5px;
-    }
-
-    #mainForm table, #recordsTable table {
-      display: block;
-      overflow-x: auto;
-      white-space: nowrap;
-      -webkit-overflow-scrolling: touch;
-      border-radius: 5px;
-    }
-
-    #mainForm td {
-      border: none;
-    }
-
-    #mainForm tr {
-      display: flex;
-      flex-wrap: wrap;
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 10px;
-      margin-bottom: 10px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-      align-items: center;
-    }
-
-    /* All fields in #mainForm become full width */
-    #mainForm td {
-      flex: 1 1 100%; 
-      margin: 5px 0; /* Remove horizontal margin */
-      min-width: unset; /* Remove min-width for full flexibility */
-    }
-    
-    .controls-container {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 10px;
-      padding: 15px;
-    }
-    .filter-group {
-      flex: 1 1 100%;
-    }
-    .controls-container button {
-      width: 100%;
-    }
-    .controls-container .filter-group.date-range {
-        flex: 1 1 100%; /* تصبح بعرض كامل على الشاشات الأصغر */
-    }
-    .logo-header {
-      flex-direction: row-reverse; /* يبقى الشعار على اليمين في RTL */
-      align-items: center;
-      gap: 10px;
-      padding-right: 0;
-      justify-content: flex-start;
-    }
-    .logo-header img {
-      height: 50px;
-    }
-    .logo-header .text-container {
-      font-size: 1em;
-      text-align: right;
-    }
-  }
-
-  @media (max-width: 480px) {
-    /* No additional changes needed for #mainForm as it's already 100% */
-  }
-
-  /* ****** تعديلات مهمة لطباعة التقرير ****** */
-  @media print {
-    body {
-      font-size: 9pt;
-      margin: 0;
-      padding: 0;
-      background: none;
-      color: #000;
-      direction: rtl; 
-      -webkit-print-color-adjust: exact !important; 
-      print-color-adjust: exact !important;
-    }
-    /* إخفاء جميع العناصر غير الجدول عند الطباعة */
-    .card, 
-    #mainForm, 
-    .controls-container, 
-    .search-navigation-group, 
-    .msg-container, 
-    .pagination-controls,
-    h2 /* إخفاء h2 الرئيسي */
-    { 
-      display: none !important;
-    }
-    .logo-header { /* Hide main page logo header during print */
-        display: none !important;
-    }
-
-    /* إظهار محتوى الطباعة فقط */
-    .print-header {
-        display: flex !important;
-        flex-direction: row-reverse; /* الشعار على اليمين والنص على يساره */
-        justify-content: flex-start; /* ليكون على اليمين في RTL */
-        align-items: center;
-        margin-bottom: 15px;
-        padding: 0 10mm; /* يتوافق مع هوامش الصفحة */
-        box-sizing: border-box;
-        width: 100%;
-    }
-
-    .print-header .logo-container {
-        display: flex !important;
-        align-items: center;
-        gap: 10px;
-        /* margin-right: auto;  يدفع الشعار والنص إلى أقصى اليمين في RTL - لا حاجة إذا كان justify-content: flex-start */
-    }
-
-    .print-header img {
-        height: 60px; /* حجم الشعار */
-        width: auto;
-        display: block !important;
-    }
-
-    .print-header .header-text {
-        font-size: 10pt; /* حجم خط مناسب للطباعة */
-        color: #333;
-        text-align: right; /* محاذاة النص لليمين داخل الـ div */
-        display: block !important;
-    }
-    .print-header .header-text a {
-        color: #333;
-        text-decoration: none;
-        font-weight: normal;
-    }
-    .print-header .header-text a:hover {
-        text-decoration: none; /* إزالة التسطير عند الطباعة */
-    }
-
-
-    .print-title {
-        display: block !important;
-        text-align: center;
-        font-size: 1.5em;
-        font-weight: bold;
-        margin-bottom: 15px;
-        color: #000;
-        padding: 0 10mm;
-    }
-
-    #recordsTableContainer {
-      display: block !important; 
-      position: static !important; 
-      left: auto;
-      top: auto;
-      width: 100%;
-      margin: 0 auto; 
-      padding: 0 10mm; /* إضافة هوامش للجدول أيضاً */
-      box-shadow: none;
-      max-height: none !important; 
-      overflow: visible !important; 
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-    }
-    #recordsTable table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 0;
-      box-shadow: none;
-      border-radius: 0;
-      table-layout: fixed; /* تغيير إلى fixed لضمان عرض الأعمدة بشكل متساوٍ */
-    }
-    #recordsTable th, #recordsTable td {
-      border: 1px solid #000; 
-      padding: 4px;
-      font-size: 8pt;
-      color: #000;
-      white-space: normal !important; 
-      word-wrap: break-word; 
-      box-sizing: border-box;
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-    }
-    #recordsTable th {
-      background-color: #e0e0e0; 
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-    }
-    .expired {
-      background-color: #fdd !important; 
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-    }
-    /* إخفاء عمود 'إجراءات' بشكل صريح عند الطباعة */
-    #recordsTable th:last-child, 
-    #recordsTable td:last-child {
-        display: none !important;
-    }
-  }
-</style>
+        /* Notification Styling */
+        #notification-popup {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: var(--text-dark); /* Dark background for info/default */
+            color: var(--text-light);
+            padding: 12px 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            z-index: 2000;
+            display: none;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            font-size: 14px;
+            text-align: center;
+        }
+        #notification-popup.show {
+            opacity: 1;
+            display: block;
+        }
+        #notification-popup.success {
+            background-color: var(--primary-green); /* Green for success */
+        }
+        #notification-popup.error {
+            background-color: #dc3545; /* Red for error */
+        }
+        /* Buttons within interactive notification */
+        #notification-popup button {
+            background-color: var(--primary-green); /* Confirm button green */
+            color: var(--text-light);
+        }
+        #notification-popup button:hover {
+            background-color: var(--darker-green);
+        }
+        #notification-popup button[style*="background-color: #6c757d"] {
+            background-color: #6c757d !important; /* Cancel button grey */
+        }
+        #notification-popup button[style*="background-color: #6c757d"]:hover {
+            background-color: #5a6268 !important;
+        }
+    </style>
+    <script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'></script>
+    <script src='https://code.jquery.com/jquery-3.7.1.min.js'></script>
 </head>
 <body>
-
-<div class="logo-header">
-    <img src="shjmunlogo.png" alt="شعار بلدية الشارقة">
-    <div class="text-container">
-        <span>إدارة الرقابة والسلامة الصحية</span>
-        <span>قسم الرقابة البيئية</span>
+    <div id="logo-bar">
+        <img src="shjmunlogo.png" alt="شعار بلدية الشارقة">
+        <div class="logo-caption">قسم الرقابة الصحية</div>
+        <button class='panel-toggle-btn' id='toggleControlsBtn' title="لوحة الفلاتر"><i class='fas fa-bars'></i></button>
+        <button class='panel-toggle-btn' id='toggleChartsBtn' title="الرسوم البيانية"><i class='fas fa-chart-pie'></i></button>
+        <button class='panel-toggle-btn' id='toggleInfoBtn' title="معلومات النقطة"><i class='fas fa-info-circle'></i></button>
     </div>
-</div>
-
-<h2><i class="fas fa-clipboard-list"></i> إدخال بيانات الدراسات</h2>
-
-<div class="card">
-  <form id="mainForm" onsubmit="return handleFormSubmission();">
-    <table>
-      <tr>
-        <td>
-  <label for="LicID">رقم الرخصة:</label>
-  <input type="text" id="LicID" placeholder="أدخل رقم الرخصة" required autocomplete="off">
-  <div id="licenseMsg" class="msg-container error-msg" style="display:none;"></div>
-  <div id="licenseInfo" class="msg-container info-msg" style="display:none;"></div>
-</td>
-<td>
-  <button type="button" id="addNewFacilityBtn" onclick="openFacilityForm(true)" style="display:none; margin-bottom: 5px;">
-    <i class="fas fa-plus-circle"></i> إضافة منشأة جديدة
-  </button>
-  <button type="button" id="editFacilityBtn" onclick="openFacilityForm(false)" style="display:none;">
-    <i class="fas fa-edit"></i> تعديل بيانات المنشأة
-  </button>
-</td>
-
-<td>
-  <label for="Facilityname">اسم المنشأة:</label>
-  <textarea id="Facilityname" placeholder="اسم المنشأة" readonly rows="2" style="resize:none; min-width:180px; min-height:2.5em;"></textarea>
-</td>
-<td>
-  <label for="AREA">المنطقة:</label>
-  <textarea id="AREA" placeholder="المنطقة" readonly rows="2" style="resize:none; min-width:120px; min-height:2.5em;"></textarea>
-</td>
-<td>
-  <label for="Activity">النشاط:</label>
-  <textarea id="Activity" placeholder="النشاط" readonly rows="2" style="resize:none; min-width:120px; min-height:2.5em;"></textarea>
-</td>        <td>
-          <label for="SiteCoordinates">الإحداثيات:</label>
-          <input type="text" id="SiteCoordinates" placeholder="الإحداثيات" readonly>
-        </td>
-      </tr>
-      <tr>
-        <td>
-          <label for="DateContract">تاريخ العقد:</label>
-          <input type="date" id="DateContract" required>
-        </td>
-        <td>
-          <label for="StudyDate">تاريخ الدراسة:</label>
-          <input type="date" id="StudyDate" required>
-        </td>
-        <td>
-          <label for="Typeofstudy">نوع الدراسة:</label>
-          <select id="Typeofstudy" required>
-            <option value="">اختر نوع الدراسة</option>
-            <option>دراسة أولية</option>
-            <option>دراسة متابعة</option>
-            <option>دراسة نهائية</option>
-          </select>
-        </td>
-        <td>
-          <label for="DurationStudy">المدة:</label>
-          <input type="text" id="DurationStudy" placeholder="المدة" readonly>
-        </td>
-        <td>
-          <label for="Nots">ملاحظات:</label>
-          <input type="text" id="Nots" placeholder="ملاحظات (اختياري)">
-        </td>
-        <td class="form-actions">
-          <button type="submit" id="saveRecordBtn">
-            <i class="fas fa-save"></i> حفظ السجل
-          </button>
-          <button type="button" id="newRecordBtn" onclick="clearFormForNewRecord()">
-            <i class="fas fa-plus"></i> سجل جديد
-          </button>
-        </td>
-      </tr>
-    </table>
-    <input type="hidden" id="originalLicID">
-    <input type="hidden" id="originalDateContract">
-    <input type="hidden" id="originalStudyDate">
-  </form>
-</div>
-
-<div class="search-navigation-group">
-  <div class="input-group">
-    <label for="searchLicIDInput">بحث برقم الرخصة (للنموذج العلوي):</label>
-    <input type="text" id="searchLicIDInput" placeholder="أدخل رقم الرخصة" autocomplete="off">
-  </div>
-  <div class="nav-buttons">
-    <button id="prevRecordBtn" onclick="navigateRecords(-1)" disabled><i class="fas fa-arrow-right"></i> السابق</button>
-    <button id="nextRecordBtn" onclick="navigateRecords(1)" disabled><i class="fas fa-arrow-left"></i> التالي</button>
-  </div>
-</div>
-
-<div class="card controls-container">
-  <div class="filter-group" style="flex: 1 1 100%; min-width: unset;">
-    <label for="generalSearchInput"><i class="fas fa-filter"></i> بحث شامل للجدول (رقم الرخصة, اسم المنشأة, المنطقة, النشاط, نوع الدراسة, المدة, ملاحظات):</label>
-    <input type="text" id="generalSearchInput" placeholder="أدخل كلمة أو جزء من المعلومات..." onkeyup="loadRecordsTable(1)">
-  </div>
-  
-  <div class="filter-group date-range">
-    <label>تاريخ العقد (من - إلى):</label>
-    <div>
-        <input type="date" id="filterDateContractStart" title="تاريخ العقد من" onchange="loadRecordsTable(1)">
-    </div>
-    <div>
-        <input type="date" id="filterDateContractEnd" title="تاريخ العقد إلى" onchange="loadRecordsTable(1)">
-    </div>
-  </div>
-  <div class="filter-group date-range">
-    <label>تاريخ الدراسة (من - إلى):</label>
-    <div>
-        <input type="date" id="filterStudyDateStart" title="تاريخ الدراسة من" onchange="loadRecordsTable(1)">
-    </div>
-    <div>
-        <input type="date" id="filterStudyDateEnd" title="تاريخ الدراسة إلى" onchange="loadRecordsTable(1)">
-    </div>
-  </div>
-
-
-  <button onclick="printReport()">
-    <i class="fas fa-print"></i> طباعة التقرير
-  </button>
-  <button onclick="exportToExcel()">
-    <i class="fas fa-file-excel"></i> تصدير لـ Excel
-  </button>
-</div>
-
-<div class="card">
-  <div id="recordsTableContainer">
-    <div id="recordsTable">
-      <p style="text-align: center; padding: 20px;">جارٍ تحميل البيانات ... <i class="fas fa-spinner fa-spin"></i></p>
-    </div>
-  </div>
-  <div class="pagination-controls">
-    <button id="prevPageBtn" onclick="changePage(-1)" disabled><i class="fas fa-chevron-right"></i> السابق</button>
-    <span id="pageInfo">الصفحة 1 من 1</span>
-    <button id="nextPageBtn" onclick="changePage(1)" disabled><i class="fas fa-chevron-left"></i> التالي</button>
-  </div>
-</div>
-
-<script>
-let allLicIDs = []; // لقائمة أرقام الرخص للتنقل العلوي (فقط التي لديها سجلات تفتيش)
-let currentLicIDIndex = -1; // مؤشر لرقم الرخصة الحالي في allLicIDs
-
-const recordsPerPage = 50; // عدد السجلات في كل صفحة
-let currentPage = 1; // الصفحة الحالية للجدول السفلي
-let totalPages = 1; // إجمالي عدد الصفحات
-
-// العناصر الرئيسية للنموذج
-const LicIDInput = document.getElementById('LicID');
-const FacilitynameInput = document.getElementById('Facilityname');
-const AREAInput = document.getElementById('AREA');
-const ActivityInput = document.getElementById('Activity');
-const SiteCoordinatesInput = document.getElementById('SiteCoordinates');
-const DateContractInput = document.getElementById('DateContract');
-const StudyDateInput = document.getElementById('StudyDate');
-const TypeofstudySelect = document.getElementById('Typeofstudy');
-const DurationStudyInput = document.getElementById('DurationStudy');
-const NotsInput = document.getElementById('Nots');
-
-const licenseMsgDiv = document.getElementById('licenseMsg');
-const licenseInfoDiv = document.getElementById('licenseInfo');
-
-// حقول مخفية لتخزين قيم السجل الأصلية عند التعديل
-const originalLicIDInput = document.getElementById('originalLicID');
-const originalDateContractInput = document.getElementById('originalDateContract');
-const originalStudyDateInput = document.getElementById('originalStudyDate');
-
-// عناصر البحث والتنقل العلوي
-const searchLicIDInput = document.getElementById('searchLicIDInput');
-const prevRecordBtn = document.getElementById('prevRecordBtn');
-const nextRecordBtn = document.getElementById('nextRecordBtn');
-
-
-// **********************************************
-// وظائف المساعد
-// **********************************************
-function showMessage(element, message, type) {
-  element.textContent = message;
-  element.className = `msg-container ${type}-msg`;
-  element.style.display = 'block';
-}
-
-function hideMessage(element) {
-  element.style.display = 'none';
-}
-
-function clearFormFields() {
-  LicIDInput.value = '';
-  FacilitynameInput.value = '';
-  AREAInput.value = '';
-  ActivityInput.value = '';
-  SiteCoordinatesInput.value = '';
-  DateContractInput.value = '';
-  StudyDateInput.value = '';
-  TypeofstudySelect.value = '';
-  DurationStudyInput.value = '';
-  NotsInput.value = '';
-  
-  originalLicIDInput.value = '';
-  originalDateContractInput.value = '';
-  originalStudyDateInput.value = '';
-
-  hideMessage(licenseMsgDiv);
-  hideMessage(licenseInfoDiv);
-  document.getElementById('addNewFacilityBtn').style.display = 'none';
-  document.getElementById('editFacilityBtn').style.display = 'none';
-  LicIDInput.removeAttribute('readonly'); // اجعل حقل رقم الرخصة قابلاً للتعديل عند مسح النموذج
-  LicIDInput.focus();
-}
-
-function fillFormWithRecord(record) {
-  // لا تستدعي clearFormFields() هنا، دعها تتم قبل استدعاء هذه الدالة إذا لزم الأمر
-  if (record) {
-    LicIDInput.value = record.LicID || '';
-    FacilitynameInput.value = record.Facilityname || '';
-    AREAInput.value = record.AREA || '';
-    ActivityInput.value = record.Activity || '';
-    SiteCoordinatesInput.value = record.SiteCoordinates || '';
-    DateContractInput.value = record.DateContract || '';
-    StudyDateInput.value = record.StudyDate || '';
-    TypeofstudySelect.value = record.Typeofstudy || '';
-    DurationStudyInput.value = record.DurationStudy || ''; // يجب أن يكون موجوداً
-    NotsInput.value = record.Nots || '';
-    
-    // تخزين القيم الأصلية في الحقول المخفية للتعديل
-    originalLicIDInput.value = record.LicID || '';
-    originalDateContractInput.value = record.DateContract || '';
-    originalStudyDateInput.value = record.StudyDate || '';
-
-    LicIDInput.setAttribute('readonly', 'true'); // اجعل حقل رقم الرخصة للقراءة فقط بمجرد تحميل سجل
-
-    // عرض أزرار تعديل المنشأة إذا كانت موجودة
-    document.getElementById('editFacilityBtn').style.display = 'inline-flex'; 
-    document.getElementById('addNewFacilityBtn').style.display = 'none'; 
-  } 
-}
-
-// **********************************************
-// وظائف نموذج الإدخال (العلوي)
-// **********************************************
-
-// حدث الإدخال على رقم الرخصة لتعبئة بيانات المنشأة عند الكتابة في حقل رقم الرخصة الرئيسي
-LicIDInput.addEventListener('blur', async function() {
-    const lic = this.value.trim();
-    
-    // مسح حقول المنشأة للقراءة فقط وحقول التفتيش
-    FacilitynameInput.value = '';
-    AREAInput.value = '';
-    ActivityInput.value = '';
-    SiteCoordinatesInput.value = '';
-    DurationStudyInput.value = '';
-    DateContractInput.value = '';
-    StudyDateInput.value = '';
-    TypeofstudySelect.value = '';
-    NotsInput.value = '';
-
-    // مسح الحقول المخفية للتعديل
-    originalLicIDInput.value = '';
-    originalDateContractInput.value = '';
-    originalStudyDateInput.value = '';
-
-    // إخفاء الأزرار والرسائل مبدئياً
-    document.getElementById('addNewFacilityBtn').style.display = 'none';
-    document.getElementById('editFacilityBtn').style.display = 'none';
-    hideMessage(licenseMsgDiv);
-    hideMessage(licenseInfoDiv);
-
-    if (lic.length === 0) { 
-        return;
-    }
-
-    // جلب بيانات المنشأة أولاً
-    const facilityData = await fetchFacilityDataOnly(lic);
-
-    if (facilityData) {
-        // إذا تم العثور على بيانات منشأة، حاول جلب آخر سجل تفتيش (للعرض/التعديل)
-        // لا تستدعي fetchRecordForForm هنا تلقائياً، بل اترك الحقول فارغة لإدخال جديد
-        showMessage(licenseInfoDiv, 'تم العثور على المنشأة، يمكنك الآن إضافة سجل تفتيش جديد.', 'info');
-        // تأكد من أن LicID أصبح للقراءة فقط بعد العثور على المنشأة
-        LicIDInput.setAttribute('readonly', 'true'); 
-        // عرض زر تعديل المنشأة
-        document.getElementById('editFacilityBtn').style.display = 'inline-flex';
-        document.getElementById('addNewFacilityBtn').style.display = 'none';
-
-    } else {
-        // إذا لم يتم العثور على المنشأة، اعرض رسالة مناسبة
-        showMessage(licenseMsgDiv, 'رقم الرخصة غير موجود. الرجاء إضافتها كمنشأة جديدة.', 'error');
-        document.getElementById('addNewFacilityBtn').style.display = 'inline-flex'; 
-        LicIDInput.removeAttribute('readonly'); // اجعل حقل رقم الرخصة قابلاً للكتابة مرة أخرى
-    }
-});
-
-// وظيفة جلب السجل للنموذج العلوي (مستخدمة بواسطة loadRecordForEditFromTable و searchAndLoadRecord)
-// هذه الوظيفة مصممة لـ *تحميل* سجل محدد، وليس فقط للتحقق من وجود المنشأة
-async function fetchRecordForForm(licId, dateContract = '', studyDate = '') {
-    let url = `inspection.php?action=get_record_for_form&LicID=${encodeURIComponent(licId)}`;
-    if (dateContract && studyDate) {
-        url += `&DateContract=${encodeURIComponent(dateContract)}&StudyDate=${encodeURIComponent(studyDate)}`;
-    }
-
-    showMessage(licenseInfoDiv, `جاري البحث عن سجل تفتيش لـ رقم الرخصة ${licId}...`, 'info');
-
-    try {
-        const response = await fetch(url, {
-            headers: {'X-Requested-With': 'XMLHttpRequest'}
-        });
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-
-        hideMessage(licenseInfoDiv);
-        if (data && data.LicID) { // تم العثور على سجل تفتيش
-            fillFormWithRecord(data); // هذه الدالة تملأ الفورم وتضبط readonly
-            showMessage(licenseInfoDiv, `تم تحميل السجل لـ رقم الرخصة ${data.LicID}.`, 'success');
-            // تسليط الضوء على السجل في الجدول السفلي (هذا جيد ومطلوب)
-            highlightRowInTable(data.LicID, data.DateContract, data.StudyDate);
-            return true; // تم العثور على سجل تفتيش
-        } else { // لم يتم العثور على سجل تفتيش
-            // إذا لم يتم العثور على سجل تفتيش، يجب أن تكون الحقول فارغة
-            // يجب أن تكون بيانات المنشأة موجودة إذا كان LicID صحيحاً
-            // وبالتالي نعرض رسالة بأن المنشأة موجودة ولكن لا سجلات تفتيش
-            showMessage(licenseInfoDiv, `تم العثور على المنشأة (رقم الرخصة: ${licId})، ولكن لا يوجد سجل تفتيش مطابق.`, 'info');
-            // تأكد من مسح حقول التفتيش فقط في هذه الحالة
-            DateContractInput.value = '';
-            StudyDateInput.value = '';
-            TypeofstudySelect.value = '';
-            NotsInput.value = '';
-            originalLicIDInput.value = ''; // تأكد من أن الحقول الأصلية فارغة لإضافة سجل جديد
-            originalDateContractInput.value = '';
-            originalStudyDateInput.value = '';
-            
-            // تأكد من أن LicID للقراءة فقط بما أن المنشأة موجودة
-            LicIDInput.setAttribute('readonly', 'true');
-            document.getElementById('editFacilityBtn').style.display = 'inline-flex';
-            document.getElementById('addNewFacilityBtn').style.display = 'none';
-
-            return false; // لم يتم العثور على سجل تفتيش
-        }
-    } catch (error) {
-        console.error("Error fetching record for form:", error);
-        hideMessage(licenseInfoDiv);
-        showMessage(licenseMsgDiv, 'خطأ في الاتصال أثناء جلب بيانات السجل. يرجى التحقق من اتصال الإنترنت أو مسار الخادم.', 'error');
-        // لا تمسح كل الحقول هنا، فقط حقول التفتيش إن أمكن
-        DateContractInput.value = '';
-        StudyDateInput.value = '';
-        TypeofstudySelect.value = '';
-        NotsInput.value = '';
-        return false;
-    }
-}
-
-// وظيفة منفصلة لجلب بيانات المنشأة فقط (عند عدم وجود سجل تفتيش أو للتحقق الأولي)
-async function fetchFacilityDataOnly(licId) {
-    try {
-        const response = await fetch(`inspection.php?action=get_facility_data_only&LicID=${encodeURIComponent(licId)}`, {
-            headers: {'X-Requested-With': 'XMLHttpRequest'}
-        });
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-        
-        if (data && data.LicenseID) {
-            FacilitynameInput.value = data.Facilityname || '';
-            AREAInput.value = data.AREA || '';
-            ActivityInput.value = data.Activity || '';
-            SiteCoordinatesInput.value = data.SiteCoordinates || '';
-            DurationStudyInput.value = (data.Activity && data.Activity.trim() !== "") ? '1 year' : '3 years';
-            // لا تضبط readonly هنا، هذا يتم في LicIDInput.addEventListener
-            // ولا تضبط زر التعديل هنا، هذا يتم في LicIDInput.addEventListener
-            return data; // إرجاع بيانات المنشأة
-        } else {
-            // لم يتم العثور على المنشأة
-            FacilitynameInput.value = '';
-            AREAInput.value = '';
-            ActivityInput.value = '';
-            SiteCoordinatesInput.value = '';
-            DurationStudyInput.value = '';
-            return null;
-        }
-    } catch (error) {
-        console.error("Error fetching facility data only:", error);
-        showMessage(licenseMsgDiv, 'خطأ في الاتصال أثناء جلب بيانات المنشأة.', 'error');
-        return null;
-    }
-}
-
-function openFacilityForm(isNew) {
-  const formURL = 'save_estab.php'; // تأكد أن هذا هو المسار الصحيح لملف إضافة/تعديل المنشآت
-  let targetURL = formURL;
-
-  const currentLicID = LicIDInput.value.trim();
-
-  if (currentLicID) { 
-    targetURL += `?LicenseID=${encodeURIComponent(currentLicID)}`;
-    if (isNew) {
-      targetURL += '&action=add';
-    } else {
-      targetURL += '&action=edit';
-    }
-  } else if (isNew) {
-      targetURL += `?action=add`; 
-  }
-  
-  const facilityWindow = window.open(targetURL, '_blank', 'width=800,height=600');
-  if (facilityWindow) {
-    facilityWindow.onbeforeunload = async function() {
-        // بعد إغلاق نافذة المنشأة، أعد تحميل بيانات المنشأة في النموذج الرئيسي
-        if (LicIDInput.value.trim()) {
-            await fetchFacilityDataOnly(LicIDInput.value.trim()); 
-            // إذا كان المستخدم يعدل سجل تفتيش محدد (وليس إضافة جديد)
-            // أعد تحميل سجل التفتيش للتأكد من تحديث أي بيانات ذات صلة بالمنشأة
-            if (originalLicIDInput.value && originalDateContractInput.value && originalStudyDateInput.value) {
-                 fetchRecordForForm(LicIDInput.value, originalDateContractInput.value, originalStudyDateInput.value);
-            }
-        }
-    };
-  }
-}
-
-async function handleFormSubmission() {
-  const LicID = LicIDInput.value.trim();
-  const DateContract = DateContractInput.value;
-  const StudyDate = StudyDateInput.value;
-  const Typeofstudy = TypeofstudySelect.value;
-  const Nots = NotsInput.value.trim();
-
-  const originalLicID = originalLicIDInput.value.trim();
-  const originalDateContract = originalDateContractInput.value;
-  const originalStudyDate = originalStudyDateInput.value;
-
-  if (!LicID || !DateContract || !StudyDate || !Typeofstudy) {
-    showMessage(licenseMsgDiv, 'يرجى ملء كل الحقول المطلوبة (رقم الرخصة، تاريخ العقد، تاريخ الدراسة، نوع الدراسة).', 'error');
-    return false;
-  }
-
-  const formData = new URLSearchParams();
-  formData.append('LicID', LicID);
-  formData.append('DateContract', DateContract);
-  formData.append('StudyDate', StudyDate);
-  formData.append('Typeofstudy', Typeofstudy);
-  formData.append('Nots', Nots);
-
-  // إذا كانت قيم original موجودة، فهذا يعني أننا نقوم بالتعديل
-  if (originalLicID && originalDateContract && originalStudyDate) {
-      formData.append('originalLicID', originalLicID);
-      formData.append('originalDateContract', originalDateContract);
-      formData.append('originalStudyDate', originalStudyDate);
-  }
-
-  let actionUrl = 'inspection.php?action=save_record';
-  
-  try {
-    const response = await fetch(actionUrl, { 
-      method: 'POST',
-      headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'X-Requested-With': 'XMLHttpRequest'
-      },
-      body: formData.toString()
-    });
-    const data = await response.json();
-
-    if (data.status === 'success') {
-      showMessage(licenseInfoDiv, data.message, 'success');
-      LicIDInput.setAttribute('readonly', 'true'); // اجعل رقم الرخصة للقراءة فقط بعد الحفظ/التعديل
-
-      // تحديث الحقول المخفية للقيم الأصلية إذا كانت العملية تحديث أو إضافة جديدة
-      originalLicIDInput.value = LicID;
-      originalDateContractInput.value = DateContract;
-      originalStudyDateInput.value = StudyDate;
-      
-      // إعادة تحميل جدول السجلات وتحديث قائمة LicIDs (لضمان تحديث عرض Pagination والفلاتر)
-      await fetchAllLicIDsForNavigation(); // تحديث قائمة LicIDs بعد الحفظ
-      loadRecordsTable(currentPage); // فقط إعادة تحميل الجدول بعد الحفظ
-
-    } else {
-      showMessage(licenseMsgDiv, data.message || 'فشل الحفظ بسبب خطأ غير معروف.', 'error');
-    }
-  } catch (error) {
-      console.error("Error saving record:", error);
-      showMessage(licenseMsgDiv, 'خطأ في الحفظ: فشل الاتصال بالخادم. ' + error.message, 'error');
-  }
-
-  return false;
-}
-
-function clearFormForNewRecord() {
-    clearFormFields(); // هذه الدالة ستمسح كل شيء، بما في ذلك LicID وتزيل readonly
-    hideMessage(licenseMsgDiv);
-    hideMessage(licenseInfoDiv);
-    searchLicIDInput.value = ''; // مسح حقل بحث رقم الرخصة العلوي
-    currentLicIDIndex = -1; // إعادة تعيين مؤشر التنقل
-    updateNavigationButtons(); // تعطيل أزرار التنقل
-    
-    // عند إضافة سجل جديد، لا نحاول جلب بيانات المنشأة إلا إذا قام المستخدم بإدخال LicID
-    // نترك حقل LicID فارغًا وقابلًا للكتابة لبدء إدخال جديد
-}
-
-// **********************************************
-// وظائف البحث والتنقل (للنموذج العلوي)
-// **********************************************
-
-// جلب جميع أرقام الرخص الموجودة في TblRegistration
-async function fetchAllLicIDsForNavigation() {
-    try {
-        // جلب جميع الـ LicID من TblEstablishmente بدلاً من TblRegistration 
-        // لضمان وجود جميع المنشآت في قائمة التنقل، حتى لو لم يكن لديها سجلات تفتيش
-        const response = await fetch('inspection.php?action=get_all_licids', { // تم تعديل استعلام get_all_licids في PHP ليعود بـ DISTINCT LicID من TblRegistration.
-                                                                                // إذا أردت كل الرخص حتى التي لا تملك سجلات تفتيش، يجب تعديل الاستعلام في inspection.php
-                                                                                // إلى "SELECT LicenseID FROM TblEstablishmente ORDER BY LicenseID ASC"
-            headers: {'X-Requested-With': 'XMLHttpRequest'}
-        });
-        const data = await response.json();
-        if (data.status === 'success') {
-            allLicIDs = data.licIDs;
-            updateNavigationButtons();
-        } else {
-            console.error("Error fetching all LicIDs for navigation:", data.message);
-            allLicIDs = [];
-            currentLicIDIndex = -1;
-            updateNavigationButtons();
-        }
-    } catch (error) {
-        console.error("Error fetching all LicIDs for navigation:", error);
-        allLicIDs = [];
-        currentLicIDIndex = -1;
-        updateNavigationButtons();
-    }
-}
-
-// البحث عن سجل محدد بناءً على رقم الرخصة وتعبئة النموذج
-async function searchAndLoadRecord(licIdToSearch) {
-    clearFormFields(); // ابدأ بمسح النموذج بالكامل
-    LicIDInput.value = licIdToSearch; // ثم ضع رقم الرخصة في الحقل
-
-    if (!licIdToSearch) {
-        currentLicIDIndex = -1;
-        updateNavigationButtons();
-        return;
-    }
-
-    const facilityData = await fetchFacilityDataOnly(licIdToSearch);
-
-    if (facilityData) {
-        // إذا تم العثور على المنشأة، حاول جلب *آخر* سجل تفتيش لها
-        // هذا السلوك مطلوب لأزرار التنقل والبحث العلوي (يعرض آخر سجل)
-        const recordFound = await fetchRecordForForm(licIdToSearch); 
-        if (recordFound) {
-            // تم العثور على سجل تفتيش، تحديث مؤشر التنقل
-            const index = allLicIDs.indexOf(licIdToSearch);
-            if (index !== -1) {
-                currentLicIDIndex = index;
-            } else {
-                // إذا تم البحث عن LicID لا يحتوي على سجلات تفتيش في allLicIDs (التي تأتي من TblRegistration)
-                // فهذا يعني أن هذا LicID لا يمكن التنقل فيه باستخدام أزرار التنقل الحالي
-                currentLicIDIndex = -1; 
-            }
-            updateNavigationButtons();
-        } else {
-            // تم العثور على المنشأة ولكن لا توجد سجلات تفتيش
-            showMessage(licenseInfoDiv, `تم العثور على المنشأة (رقم الرخصة: ${licIdToSearch})، ولكن لا يوجد سجل تفتيش مطابق. يمكنك إضافة سجل جديد.`, 'info');
-            currentLicIDIndex = -1; // تعطيل التنقل بأزرار السابق/التالي
-            updateNavigationButtons();
-        }
-    } else {
-        // لم يتم العثور على المنشأة على الإطلاق
-        showMessage(licenseMsgDiv, 'رقم الرخصة غير موجود. الرجاء إضافتها كمنشأة جديدة.', 'error');
-        document.getElementById('addNewFacilityBtn').style.display = 'inline-flex';
-        LicIDInput.removeAttribute('readonly'); // اجعل حقل رقم الرخصة قابلاً للكتابة مرة أخرى
-        currentLicIDIndex = -1;
-        updateNavigationButtons();
-    }
-}
-
-// التنقل بين السجلات
-function navigateRecords(direction) {
-    if (allLicIDs.length === 0) {
-        showMessage(licenseInfoDiv, 'لا توجد سجلات أرقام رخص للتنقل.', 'info');
-        return;
-    }
-
-    let targetIndex = currentLicIDIndex;
-
-    if (targetIndex === -1) {
-        // إذا لم يكن هناك سجل محدد حاليًا، ابدأ من البداية أو النهاية
-        targetIndex = (direction === 1) ? 0 : allLicIDs.length - 1;
-    } else {
-        targetIndex += direction;
-    }
-
-    if (targetIndex < 0) {
-        targetIndex = 0; // البقاء عند السجل الأول
-    } else if (targetIndex >= allLicIDs.length) {
-        targetIndex = allLicIDs.length - 1; // البقاء عند السجل الأخير
-    }
-
-    currentLicIDIndex = targetIndex; // تحديث المؤشر
-    const nextLicID = allLicIDs[currentLicIDIndex];
-
-    if (nextLicID) {
-        searchLicIDInput.value = nextLicID; // تحديث حقل البحث العلوي
-        searchAndLoadRecord(nextLicID); // تحميل السجل في النموذج
-    }
-    updateNavigationButtons();
-}
-
-function updateNavigationButtons() {
-    prevRecordBtn.disabled = (currentLicIDIndex <= 0 || allLicIDs.length === 0);
-    nextRecordBtn.disabled = (currentLicIDIndex >= allLicIDs.length - 1 || allLicIDs.length === 0);
-}
-
-// حدث عند إدخال رقم في حقل البحث برقم الرخصة العلوي
-searchLicIDInput.addEventListener('input', function() {
-    const searchTerm = this.value.trim();
-    if (searchTerm.length > 0) {
-        searchAndLoadRecord(searchTerm);
-    } else {
-        // إذا تم مسح حقل البحث، مسح النموذج الرئيسي
-        clearFormForNewRecord(); // استخدم هذه الدالة لمسح كامل وإعادة تعيين
-    }
-});
-
-
-// **********************************************
-// وظائف الجدول السفلي (للعرض فقط مع Pagination)
-// **********************************************
-
-// تهيئة Pagination عند تحميل الصفحة
-document.addEventListener('DOMContentLoaded', () => {
-    fetchAllLicIDsForNavigation(); // جلب أرقام الرخص لتفعيل التنقل العلوي
-    loadRecordsTable(currentPage); // تحميل الصفحة الأولى من الجدول بشكل منفصل
-});
-
-
-function getFilters() {
-    return {
-        generalSearch: document.getElementById('generalSearchInput').value.trim(),
-        filterDateContractStart: document.getElementById('filterDateContractStart').value,
-        filterDateContractEnd: document.getElementById('filterDateContractEnd').value,
-        filterStudyDateStart: document.getElementById('filterStudyDateStart').value,
-        filterStudyDateEnd: document.getElementById('filterStudyDateEnd').value
-    };
-}
-
-
-async function loadRecordsTable(page = 1) {
-  currentPage = page;
-  document.getElementById('recordsTable').innerHTML = '<p style="text-align: center; padding: 20px;">جارٍ تحميل البيانات ... <i class="fas fa-spinner fa-spin"></i></p>';
-  const offset = (currentPage - 1) * recordsPerPage;
-  const filters = getFilters();
-
-  const params = new URLSearchParams({
-      action: 'list_paginated',
-      limit: recordsPerPage,
-      offset: offset,
-      ...filters // إضافة كل الفلاتر
-  });
-
-  try {
-    const response = await fetch('inspection.php?' + params.toString(), {
-      headers: {'X-Requested-With': 'XMLHttpRequest'}
-    });
-    if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
-    if (data.status === 'error') { // تحقق من وجود خطأ في الاستجابة JSON
-        throw new Error(data.message);
-    }
-
-    totalPages = Math.ceil(data.totalRecords / recordsPerPage);
-    displayRecordsTable(data.records);
-    updatePaginationControls(data.totalRecords);
-
-    // إذا كان هناك سجل محدد في النموذج العلوي، حاول تمييزه في الجدول
-    if (LicIDInput.value && originalDateContractInput.value && originalStudyDateInput.value) {
-        highlightRowInTable(LicIDInput.value, originalDateContractInput.value, originalStudyDateInput.value);
-    }
-
-  } catch (error) {
-    console.error("Error loading records table:", error);
-    document.getElementById('recordsTable').innerHTML = `<p style="text-align: center; padding: 20px; color: #dc3545;"><i class="fas fa-exclamation-triangle"></i> خطأ في تحميل البيانات: ${error.message}</p>`;
-    updatePaginationControls(0); // تحديث أدوات التحكم بالصفحات إلى حالة عدم وجود بيانات
-  }
-}
-
-function updatePaginationControls(totalRecords) {
-    document.getElementById('pageInfo').textContent = `الصفحة ${currentPage} من ${totalPages} (إجمالي: ${totalRecords} سجل)`;
-    document.getElementById('prevPageBtn').disabled = (currentPage === 1);
-    document.getElementById('nextPageBtn').disabled = (currentPage === totalPages || totalRecords === 0);
-}
-
-function changePage(delta) {
-    const newPage = currentPage + delta;
-    if (newPage >= 1 && newPage <= totalPages) {
-        loadRecordsTable(newPage);
-    }
-}
-
-
-function displayRecordsTable(recordsToDisplay) {
-  let html = `<table>
-    <thead><tr>
-      <th>رقم الرخصة</th>
-      <th>اسم المنشأة</th>
-      <th>المنطقة</th>
-      <th>النشاط</th>
-      <th>الإحداثيات</th>
-      <th>تاريخ العقد</th>
-      <th>تاريخ الدراسة</th>
-      <th>نوع الدراسة</th>
-      <th>المدة</th>
-      <th>ملاحظات</th>
-      <th>إجراءات</th>
-    </tr></thead><tbody>`;
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  if (recordsToDisplay.length === 0) {
-      html += '<tr><td colspan="11" style="padding: 20px;">لا توجد سجلات مطابقة لمعايير البحث.</td></tr>';
-  } else {
-      recordsToDisplay.forEach(row => {
-        let studyDate = new Date(row.StudyDate);
-        studyDate.setHours(0, 0, 0, 0);
-
-        let years = (row.DurationStudy && String(row.DurationStudy).includes('3')) ? 3 : 1;
-        let expireDate = new Date(studyDate);
-        expireDate.setFullYear(expireDate.getFullYear() + years);
-        expireDate.setHours(0, 0, 0, 0);
-
-        let isExpired = expireDate < today;
-
-        // إنشاء رابط جوجل ماب للإحداثيات
-        let coordinatesLink = '';
-        if (row.SiteCoordinates) {
-            const coords = row.SiteCoordinates.split(',').map(c => c.trim());
-            // تأكد من أن هناك عنصرين وأن كلاهما أرقام
-            if (coords.length === 2 && !isNaN(parseFloat(coords[0])) && !isNaN(parseFloat(coords[1]))) {
-                coordinatesLink = `<a href="http://maps.google.com/?q=${coords[0]},${coords[1]}" target="_blank" class="coordinates-link">${row.SiteCoordinates}</a>`; // تم تصحيح الرابط
-            } else {
-                coordinatesLink = row.SiteCoordinates; // إذا كانت غير صالحة لا تكون رابطاً
-            }
-        }
-
-        html += `<tr data-licid="${row.LicID}" data-datecontract="${row.DateContract}" data-studydate="${row.StudyDate}" ${isExpired ? ' class="expired"' : ''}>
-          <td>${row.LicID || ''}</td>
-          <td>${row.Facilityname || ''}</td>
-          <td>${row.AREA || ''}</td>
-          <td>${row.Activity || ''}</td>
-          <td>${coordinatesLink}</td>
-          <td>${row.DateContract || ''}</td>
-          <td>${row.StudyDate || ''}</td>
-          <td>${row.Typeofstudy || ''}</td>
-          <td>${row.DurationStudy || ''}</td>
-          <td>${row.Nots || ''}</td>
-          <td>
-            <button onclick="loadRecordForEditFromTable('${row.LicID}', '${row.DateContract}', '${row.StudyDate}')" title="تعديل السجل">
-              <i class="fas fa-edit"></i>
-            </button>
-            <button onclick="deleteRecord('${row.LicID}', '${row.DateContract}', '${row.StudyDate}')" title="حذف السجل">
-              <i class="fas fa-trash-alt"></i>
-            </button>
-          </td>
-        </tr>`;
-      });
-  }
-
-  html += '</tbody></table>';
-  document.getElementById('recordsTable').innerHTML = html;
-}
-
-// دالة جديدة لتحميل السجل للتعديل باستخدام LicID و DateContract و StudyDate من الجدول السفلي
-async function loadRecordForEditFromTable(licId, dateContract, studyDate) {
-    showMessage(licenseInfoDiv, `جاري تحميل سجل التفتيش لـ رقم الرخصة ${licId} بتاريخ ${studyDate} للتعديل...`, 'info');
-    // قم بمسح حقل البحث العلوي لضمان عدم تداخله
-    searchLicIDInput.value = ''; 
-    // استخدام fetchRecordForForm لجلب البيانات وتعبئة النموذج
-    await fetchRecordForForm(licId, dateContract, studyDate);
-    // تحديث مؤشر التنقل العلوي بما يتناسب مع السجل المحمل
-    if (allLicIDs.includes(licId)) {
-        currentLicIDIndex = allLicIDs.indexOf(licId);
-        updateNavigationButtons();
-    }
-    // تمرير الشاشة إلى النموذج العلوي
-    document.getElementById('mainForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-function highlightRowInTable(licId, dateContract, studyDate) {
-    // إزالة التمييز الحالي من جميع الصفوف
-    document.querySelectorAll('#recordsTable tbody tr').forEach(row => {
-        row.classList.remove('highlighted-row');
-    });
-
-    // تمييز الصف الذي يتطابق مع LicID و DateContract و StudyDate
-    const targetRow = document.querySelector(`#recordsTable tbody tr[data-licid="${licId}"][data-datecontract="${dateContract}"][data-studydate="${studyDate}"]`);
-    if (targetRow) {
-        targetRow.classList.add('highlighted-row');
-        // تمرير الشاشة إلى الصف المميز
-        // targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' }); // يمكن تفعيل هذا إذا كان الجدول طويلاً جداً
-    }
-}
-
-
-async function deleteRecord(licId, dateContract, studyDate) {
-  if (!confirm('هل أنت متأكد من حذف هذا السجل؟')) return;
-  
-  try {
-    const formData = new URLSearchParams();
-    formData.append('LicID', licId);
-    formData.append('DateContract', dateContract);
-    formData.append('StudyDate', studyDate);
-
-    const response = await fetch('inspection.php?action=delete', { 
-      method: 'POST',
-      headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'X-Requested-With': 'XMLHttpRequest'
-      },
-      body: formData.toString()
-    });
-    if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    const data = await response.json();
-    if (data.status === 'error') { // تحقق من وجود خطأ في الاستجابة JSON
-        throw new Error(data.message);
-    }
-
-    if (data.status === 'success') {
-        alert(data.message);
-        await fetchAllLicIDsForNavigation(); // تحديث قائمة LicIDs بعد الحذف
-        loadRecordsTable(currentPage); // إعادة تحميل الصفحة الحالية من الجدول
-        // مسح النموذج إذا كان السجل المحذوف هو المعروض
-        if (LicIDInput.value === licId && originalDateContractInput.value === dateContract && originalStudyDateInput.value === studyDate) {
-            clearFormForNewRecord(); 
-            searchLicIDInput.value = ''; // مسح حقل البحث العلوي
-        }
-    } else {
-        alert('خطأ في الحذف: ' + data.message);
-    }
-  } catch (error) {
-      console.error("Error deleting record:", error);
-      alert('خطأ في الحذف: فشل الاتصال بالخادم. ' + error.message);
-  }
-}
-
-async function printReport() {
-    showMessage(licenseInfoDiv, 'جارٍ إعداد التقرير للطباعة...', 'info');
-    const filters = getFilters(); // جلب الفلاتر المطبقة حاليًا
-    const params = new URLSearchParams({
-        action: 'list_all_for_print', // طلب جلب كل السجلات
-        ...filters
-    });
-
-    try {
-        const response = await fetch('inspection.php?' + params.toString(), {
-            headers: {'X-Requested-With': 'XMLHttpRequest'}
-        });
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-        if (data.status === 'error') {
-            throw new Error(data.message);
-        }
-
-        const recordsToPrint = data.records;
-
-        let printContent = `
-            <!DOCTYPE html>
-            <html lang="ar">
-            <head>
-                <meta charset="UTF-8">
-                <title>تقرير التفتيش</title>
-                <style>
-                    body {
-                        font-family: 'Tajawal', sans-serif;
-                        margin: 0;
-                        padding: 0;
-                        background: none;
-                        color: #000;
-                        direction: rtl;
-                        -webkit-print-color-adjust: exact !important;
-                        print-color-adjust: exact !important;
-                    }
-                    @page {
-                        size: A4 landscape; /* طباعة بالعرض */
-                        margin: 10mm; /* هوامش الطباعة */
-                    }
-                    .print-header {
-                        display: flex;
-                        flex-direction: row-reverse; /* الشعار على اليمين والنص على يساره */
-                        justify-content: flex-start; /* ليكون على اليمين في RTL */
-                        align-items: center;
-                        margin-bottom: 15px;
-                        padding: 0 10mm;
-                    }
-                    .print-header .logo-container {
-                        display: flex;
-                        align-items: center;
-                        gap: 10px;
-                    }
-                    .print-header img {
-                        height: 60px; /* حجم الشعار */
-                        width: auto;
-                    }
-                    .print-header .header-text {
-                        font-size: 10pt;
-                        color: #333;
-                        text-align: right; /* محاذاة النص داخل الـ div */
-                    }
-                    .print-header .header-text a {
-                        color: #333;
-                        text-decoration: none;
-                        font-weight: normal;
-                    }
-                    .print-title {
-                        text-align: center;
-                        font-size: 1.5em;
-                        font-weight: bold;
-                        margin-bottom: 15px;
-                        color: #000;
-                    }
-                    table {
-                        width: 100%;
-                        border-collapse: collapse;
-                        margin-top: 10px;
-                        font-size: 8pt;
-                        page-break-after: auto;
-                        table-layout: fixed; /* تحديد تخطيط ثابت للجدول */
-                    }
-                    th, td {
-                        border: 1px solid #000;
-                        padding: 4px;
-                        text-align: center;
-                        vertical-align: middle;
-                        white-space: normal;
-                        word-wrap: break-word;
-                        box-sizing: border-box;
-                    }
-                    th {
-                        background-color: #e0e0e0;
-                        color: #000;
-                    }
-                    .expired {
-                        background-color: #fdd !important; 
-                        color: #721c24; 
-                    }
-                </style>
-            </head>
-            <body>
-            <div class="print-header">
-                <div class="logo-container">
-                    <img src="shjmunlogo.png" alt="شعار بلدية الشارقة">
-                    <div class="header-text">
-                        إدارة الرقابة والسلامة الصحية<br>
-                        قسم الرقابة البيئية<br>
-                        <a href="https://fcs.wuaze.com/">https://fcs.wuaze.com/</a>
-                    </div>
-                </div>
+    <div id='map'></div>
+    <div id='controls'>
+        <div id="dashboard-summary">
+            <div class="dashboard-box">
+                <strong id="summary-total">0</strong>
+                <span>عدد المنشآت</span>
             </div>
-            <h2 class="print-title">تقرير نظام إدارة التفتيش</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>رقم الرخصة</th>
-                        <th>اسم المنشأة</th>
-                        <th>المنطقة</th>
-                        <th>النشاط</th>
-                        <th>الإحداثيات</th>
-                        <th>تاريخ العقد</th>
-                        <th>تاريخ الدراسة</th>
-                        <th>نوع الدراسة</th>
-                        <th>المدة</th>
-                        <th>ملاحظات</th>
-                    </tr>
-                </thead>
-                <tbody>
-        `;
+            <div class="dashboard-box">
+                <strong id="summary-total-actions">0</strong>
+                <span>عدد الإجراءات</span>
+            </div>
+        </div>
+        <input type="text" id="main-search-box" placeholder="بحث باسم المنشأة أو رقم الرخصة...">
+        <div style="margin-bottom:6px;">
+            <label>من تاريخ: <input type="date" id="inspection-date-from" style="width:74px;display:inline-block;margin-left:4px;"></label>
+            <label>إلى: <input type="date" id="inspection-date-to" style="width:74px;display:inline-block;"></label>
+            <label style="margin-bottom:0;"><input type="checkbox" id="show-all-facilities" style="margin-left:5px;"> عرض الجميع</label>
+        </div>
+        <div class="filter-section-header" onclick="toggleFilterContent('action-filters-content')">
+            <span><i class='fas fa-flag'></i> الإجراء</span> <i class="fas fa-chevron-down"></i>
+        </div>
+        <div id='action-filters-content' class='filter-content'>
+            <input class="filter-search-box" type="text" placeholder="بحث في الإجراءات..." oninput="filterFilterOptions('action-filters', this.value)">
+            <div id='action-filters'></div>
+        </div>
+        <div class="filter-section-header" onclick="toggleFilterContent('activity-filters-content')">
+            <span><i class='fas fa-briefcase'></i> النشاط</span> <i class="fas fa-chevron-down"></i>
+        </div>
+        <div id='activity-filters-content' class='filter-content'>
+            <input class="filter-search-box" type="text" placeholder="بحث في الأنشطة..." oninput="filterFilterOptions('activity-filters', this.value)">
+            <div id='activity-filters'></div>
+        </div>
+        <div class="filter-section-header" onclick="toggleFilterContent('license-issuing-filters-content')">
+            <span><i class='fas fa-building'></i> جهة الإصدار</span> <i class="fas fa-chevron-down"></i>
+        </div>
+        <div id='license-issuing-filters-content' class='filter-content'>
+            <input class="filter-search-box" type="text" placeholder="بحث في جهة الإصدار..." oninput="filterFilterOptions('license-issuing-filters', this.value)">
+            <div id='license-issuing-filters'></div>
+        </div>
+        <div class="filter-section-header" onclick="toggleFilterContent('ltype-filters-content')">
+            <span><i class='fas fa-id-card'></i> نوع الرخصة</span> <i class="fas fa-chevron-down"></i>
+        </div>
+        <div id='ltype-filters-content' class='filter-content'>
+            <input class="filter-search-box" type="text" placeholder="بحث في نوع الرخصة..." oninput="filterFilterOptions('ltype-filters', this.value)">
+            <div id='ltype-filters'></div>
+        </div>
+        <div class="filter-section-header" onclick="toggleFilterContent('facility-status-filters-content')">
+            <span><i class='fas fa-check-circle'></i> حالة المنشأة</span> <i class="fas fa-chevron-down"></i>
+        </div>
+        <div id='facility-status-filters-content' class='filter-content'>
+            <input class="filter-search-box" type="text" placeholder="بحث في حالة المنشأة..." oninput="filterFilterOptions('facility-status-filters', this.value)">
+            <div id='facility-status-filters'></div>
+        </div>
+        <div class="filter-section-header" onclick="toggleFilterContent('unit-filters-content')">
+            <span><i class='fas fa-users'></i> الوحدة</span> <i class="fas fa-chevron-down"></i>
+        </div>
+        <div id='unit-filters-content' class='filter-content'>
+            <input class="filter-search-box" type="text" placeholder="بحث في الوحدة..." oninput="filterFilterOptions('unit-filters', this.value)">
+            <div id='unit-filters'></div>
+        </div>
+        <div class="filter-section-header" onclick="toggleFilterContent('shjhsp-filters-content')">
+            <span><i class='fas fa-file-alt'></i> SHJHSP</span> <i class="fas fa-chevron-down"></i>
+        </div>
+        <div id='shjhsp-filters-content' class='filter-content'>
+            <input class="filter-search-box" type="text" placeholder="بحث في SHJHSP..." oninput="filterFilterOptions('shjhsp-filters', this.value)">
+            <div id='shjhsp-filters'></div>
+        </div>
+        <div class="filter-section-header" onclick="toggleFilterContent('hazard-class-filters-content')">
+            <span><i class='fas fa-exclamation-triangle'></i> درجة الخطورة</span> <i class="fas fa-chevron-down"></i>
+        </div>
+        <div id='hazard-class-filters-content' class='filter-content'>
+            <input class="filter-search-box" type="text" placeholder="بحث في درجة الخطورة..." oninput="filterFilterOptions('hazard-class-filters', this.value)">
+            <div id='hazard-class-filters'></div>
+        </div>
+        <hr>
+        <label for="mode" style="margin-bottom: 10px;">وضع التنقل:</label>
+        <select id="mode" style="width: calc(100% - 20px); padding: 8px; margin-bottom: 15px; border-radius: 5px; border: 1px solid #ccc; font-size: 13px;">
+            <option value="car">سيارة</option>
+            <option value="walk">مشي</option>
+        </select>
+        <button onclick="checkNearbyWarnings()"><i class='fas fa-bell'></i> التحقق من تحذيرات الانتهاء</button>
+        <button onclick="showPanel('charts-panel');"><i class='fas fa fa-chart-pie'></i> عرض الرسوم البيانية</button>
+        <button onclick="printAllFilteredRecords()"><i class='fas fa-print'></i> طباعة تقرير البيانات</button>
+        <button onclick="exportExcel()"><i class='fas fa-file-excel'></i> تصدير البيانات إلى Excel</button>
+        <button onclick="openNewEstablishmentForm()"><i class='fas fa-plus-circle'></i> إضافة منشأة جديدة</button>
+    </div>
+    <div id='info'>
+        <h3 style="margin-bottom:10px;font-size:15px; color:var(--accent-blue);">معلومات المنشأة</h3>
+        <div id="info-details-container">
+            <p>اضغط على نقطة في الخريطة لعرض تفاصيلها.</p>
+        </div>
+        <div id="previous-inspections" style="margin-top:15px;"></div>
+        <div class="share-buttons">
+            <button class="whatsapp-btn" id="whatsapp-btn"><i class="fab fa-whatsapp"></i> واتساب</button>
+            <button class="email-btn" id="email-btn"><i class="fas fa-envelope'></i> بريد إلكتروني</button>
+            <button class="location-btn" id="location-btn"><i class="fas fa-map-marker-alt"></i> الموقع الجغرافي</button>
+            <button class="edit-data-btn" id="edit-data-btn"><i class="fas fa-edit"></i> تعديل بيانات المنشأة</button>
+            <button class="edit-data-btn" style="background-color: #17a2b8;" id="add-inspection-btn"><i class="fas fa-clipboard-list"></i> إضافة/تعديل زيارة تفتيش</button>
+            <button class="edit-data-btn" style="background-color: #dc3545;" id="delete-establishment-btn"><i class="fas fa-trash'></i> حذف المنشأة</button>
+        </div>
+        <button onclick="$('#info').hide();" style="margin-top:10px; background-color: #6c757d;">إغلاق</button>
+    </div>
+    <div id="charts-panel">
+        <h3 style="font-size:15px;margin-bottom:10px; color:var(--accent-blue);">تقرير الرسوم البيانية</h3>
+        <div id="charts-container"></div>
+        <button onclick="printChartReport()"><i class='fas fa-print'></i> طباعة تقرير الرسوم البيانية</button>
+        <button onclick="$('#charts-panel').hide();" style="background-color: #6c757d;">إغلاق</button>
+    </div>
+    <div id="print-area" style="display:none;"></div>
+    <div id="notification-popup"></div> <script>
+        console.log("Start of script execution."); // Debug log
+        var map = L.map('map').setView([25.34626, 55.4212], 12);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+            maxZoom: 19
+        }).addTo(map);
+        console.log("Leaflet map initialized."); // Debug log
 
-        if (recordsToPrint.length === 0) {
-            printContent += '<tr><td colspan="10">لا توجد سجلات مطابقة للطباعة.</td></tr>';
-        } else {
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
+        var allPointsLayer = L.layerGroup().addTo(map);
+        var allRecords = [];
+        var filteredRecords = [];
+        var actionPriority = ['انذار', 'مهلة', 'مخالفة', 'مناسب'];
+        var notified = new Set(); // To track notified facilities for WarningPeriod expiration
+        console.log("Global variables initialized."); // Debug log
 
-            recordsToPrint.forEach(row => {
-                let studyDate = new Date(row.StudyDate);
-                studyDate.setHours(0, 0, 0, 0);
+        function getActionColor(actionString, selectedActions = []) {
+            if (!actionString) return '#b2bec3';
+            const actions = actionString.split(',').map(a => a.trim());
+            if (selectedActions && selectedActions.length > 0) {
+                for (let f of selectedActions) {
+                    if (actions.includes(f)) return colorForAction(f);
+                }
+            }
+            for (let p of actionPriority) {
+                if (actions.includes(p)) return colorForAction(p);
+            }
+            return '#b2bec3';
+        }
+        function colorForAction(action) {
+            switch (action) {
+                case 'انذار': return '#FF9800'; // Orange
+                case 'مهلة': return '#FFD600'; // Amber
+                case 'مخالفة': return '#D50000'; // Red
+                case 'مناسب': return '#009688'; // Teal
+                default: return '#b2bec3'; // Grey
+            }
+        }
+        function getActivityColor(activityType) {
+            if (!activityType) return '#e0e0e0';
+            switch (activityType) {
+                case 'تجارة - بيع مستحضرات التجميل': return '#fce4ec'; // Pink A100
+                case 'تجارة - بيع الأغذية الصحية': return '#e8f5e9'; // Green A100
+                case 'محلات الأعشاب والأغذية الصحية': return '#e0f7fa'; // Cyan A100
+                case 'منشأة فندقية': return '#ede7f6'; // Deep Purple A100
+                case 'نادي وصالة رياضية': return '#ffecb3'; // Amber A100
+                case 'صالون حلاقة رجالي': return '#f3e5f5'; // Purple A100
+                case 'مراكز التجميل النسائية': return '#fff3e0'; // Orange A100
+                case 'صالون تجميل نسائي': return '#f1f8e9'; // Light Green A100
+                default: return '#e0e0e0'; // Grey
+            }
+        }
 
-                let years = (row.DurationStudy && String(row.DurationStudy).includes('3')) ? 3 : 1;
-                let expireDate = new Date(studyDate);
-                expireDate.setFullYear(expireDate.getFullYear() + years);
-                expireDate.setHours(0, 0, 0, 0);
-
-                let isExpired = expireDate < today;
-
-                let coordinatesLink = '';
-                if (row.SiteCoordinates) {
-                    const coords = row.SiteCoordinates.split(',').map(c => c.trim());
-                    if (coords.length === 2 && !isNaN(parseFloat(coords[0])) && !isNaN(parseFloat(coords[1]))) {
-                        coordinatesLink = `<a href="http://maps.google.com/?q=${coords[0]},${coords[1]}" target="_blank">${row.SiteCoordinates}</a>`; // تم تصحيح الرابط
-                    } else {
-                        coordinatesLink = row.SiteCoordinates;
+        function createPopupContent(record) {
+            let contentHtml = `
+                <div class="popup-info-display">
+                    <div><strong>اسم المنشأة: </strong><span>${record.facility_name || 'غير متوفر'}</span></div>
+                    <div><strong>المنطقة: </strong><span>${record.area || 'غير متوفر'}</span></div>
+                    <div><strong>النشاط: </strong><span>${record.activity_type || 'غير متوفر'}</span></div>
+                    <div><strong>الإجراء الأخير: </strong><span>${record.latest_Action || 'لا يوجد إجراء'}</span></div>
+                    <div><strong>تاريخ آخر تفتيش: </strong><span>${record.latest_Inspectiondate || 'لا يوجد'}</span></div>
+                </div>
+            `;
+            return contentHtml;
+        }
+        function renderPoints(pointsToRender) {
+            console.log("renderPoints called with", pointsToRender.length, "points."); // Debug log
+            allPointsLayer.clearLayers();
+            filteredRecords = pointsToRender;
+            var selectedActions = Array.from(document.querySelectorAll('#action-filters input[type="checkbox"].action-filter:checked')).map(cb => cb.value);
+            pointsToRender.forEach(function(record) {
+                if (record.site_coordinates) {
+                    const coords = record.site_coordinates.split(',').map(Number);
+                    if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+                        var latitude = coords[0];
+                        var longitude = coords[1];
+                        var pointMarker = L.circleMarker([latitude, longitude], {
+                            color: getActivityColor(record.activity_type),
+                            weight: 2,
+                            fillColor: getActionColor(record.latest_Action, selectedActions),
+                            fillOpacity: 0.96,
+                            radius: 8
+                        }).addTo(allPointsLayer);
+                        const popupContent = createPopupContent(record);
+                        pointMarker.bindPopup(popupContent);
+                        pointMarker.on('popupopen', function (e) {
+                            console.log("Marker popup opened for:", record.facility_name); // Debug log
+                            // Ensure only the info panel is shown when a marker is clicked
+                            $('#info').show();
+                            $('#charts-panel').hide();
+                            $('#controls').hide();
+                            updateInfoPanel(record);
+                        });
                     }
                 }
-
-                printContent += `<tr ${isExpired ? ' class="expired"' : ''}>
-                    <td>${row.LicID || ''}</td>
-                    <td>${row.Facilityname || ''}</td>
-                    <td>${row.AREA || ''}</td>
-                    <td>${row.Activity || ''}</td>
-                    <td>${coordinatesLink}</td>
-                    <td>${row.DateContract || ''}</td>
-                    <td>${row.StudyDate || ''}</td>
-                    <td>${row.Typeofstudy || ''}</td>
-                    <td>${row.DurationStudy || ''}</td>
-                    <td>${row.Nots || ''}</td>
-                </tr>`;
+            });
+            updateMainSummary();
+            console.log("Points rendered and summary updated."); // Debug log
+        }
+        function updateMainSummary() {
+            console.log("updateMainSummary called."); // Debug log
+            $('#summary-total').text(filteredRecords.length);
+            let actions = 0;
+            filteredRecords.forEach(r => {
+                if (r.latest_Action) {
+                    let acts = r.latest_Action.split(',').map(x=>x.trim()).filter(Boolean);
+                    actions += acts.length;
+                }
+            });
+            $('#summary-total-actions').text(actions);
+        }
+        function filterFilterOptions(containerId, searchValue) {
+            console.log("filterFilterOptions called for", containerId, "with search:", searchValue); // Debug log
+            searchValue = searchValue.trim().toLowerCase();
+            $('#' + containerId + ' label').each(function() {
+                if (searchValue === '') { $(this).show(); return; }
+                let text = $(this).text().toLowerCase();
+                if (text.indexOf(searchValue) !== -1) $(this).show();
+                else $(this).hide();
             });
         }
-        printContent += '</tbody></table></body></html>';
-
-        const printWindow = window.open('', '_blank');
-        printWindow.document.write(printContent);
-        printWindow.document.close();
-        printWindow.focus();
-        printWindow.print();
-        // لا تغلق النافذة هنا فوراً، دع المستخدم يرى محتوى الطباعة
-        // يمكن إضافة setTimeout لإغلاقها بعد فترة إذا كنت تفضل ذلك
-        // setTimeout(() => printWindow.close(), 1000); 
-
-        hideMessage(licenseInfoDiv);
-
-    } catch (error) {
-        console.error("Error printing report:", error);
-        showMessage(licenseMsgDiv, 'فشل طباعة التقرير: ' + error.message, 'error');
-    }
-}
-
-
-function exportToExcel() {
-    let table = document.getElementById('recordsTable').getElementsByTagName('table')[0];
-    if (!table) {
-        alert("لا يوجد جدول لتصديره.");
-        return;
-    }
-
-    let csv = [];
-    csv.push('\uFEFF'); // BOM for UTF-8
-
-    // Get headers
-    let headers = Array.from(table.querySelectorAll('thead th')).map(th => th.textContent.trim());
-    headers = headers.filter(header => header !== 'إجراءات'); // Exclude 'إجراءات' column
-    csv.push(headers.join(','));
-
-    // Get rows
-    table.querySelectorAll('tbody tr').forEach(row => {
-        let rowData = [];
-        // Loop through cells, excluding the last one (actions column)
-        Array.from(row.querySelectorAll('td')).slice(0, -1).forEach(cell => {
-            let text = cell.textContent.trim();
-            // Handle commas, double quotes, and newlines in data to avoid breaking CSV structure
-            if (text.includes(',') || text.includes('"') || text.includes('\n')) {
-                text = '"' + text.replace(/"/g, '""') + '"';
-            }
-            rowData.push(text);
-        });
-        if (rowData.length > 0) { // Ensure row has data after filtering
-            csv.push(rowData.join(','));
+        function toggleFilterContent(contentId) {
+            console.log("toggleFilterContent called for", contentId); // Debug log
+            $(`#${contentId}`).slideToggle(160);
         }
-    });
+        function showPanel(panel) {
+            console.log("showPanel called for:", panel); // Debug log
+            // Hide all panels first, then show the requested one
+            $('#controls, #info, #charts-panel').hide();
+            $("#" + panel).show();
+            // Adjust position for responsive layout if needed
+            if (panel === 'controls') { $('#controls').css('left', '75px'); }
+            else if (panel === 'charts-panel') { $('#charts-panel').css('left', '380px'); }
+            else if (panel === 'info') { $('#info').css('right', '15px'); }
+        }
 
-    let csvFile = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    let downloadLink = document.createElement('a');
-    downloadLink.href = URL.createObjectURL(csvFile);
-    downloadLink.download = 'تقرير_التفتيش.csv'; 
-    document.body.appendChild(downloadLink);
-    downloadLink.click(); 
-    document.body.removeChild(downloadLink); 
-    alert('تم تصدير البيانات إلى Excel (ملف CSV).');
-}
+        function updateInfoPanel(record) {
+            console.log("updateInfoPanel called for record:", record.facility_name); // Debug log
+            let infoHtml = `
+                <div><strong>معرف المنشأة (ID): </strong><span>${record.facility_ID || 'غير متوفر'}</span></div>
+                <div><strong>رقم الرخصة: </strong><span>${record.license_no || 'غير متوفر'}</span></div>
+                <div><strong>Unique ID: </strong><span>${record.facility_unq_id || 'غير متوفر'}</span></div>
+                <div><strong>اسم المنشأة: </strong><span>${record.facility_name || 'غير متوفر'}</span></div>
+                <div><strong>المنطقة: </strong><span>${record.area || 'غير متوفر'}</span></div>
+                <div><strong>النشاط: </strong><span>${record.activity_type || 'غير متوفر'}</span></div>
+                <div><strong>العلامة التجارية: </strong><span>${record.brand_name || 'غير متوفر'}</span></div>
+                <div><strong>جهة الإصدار: </strong><span>${record.LicenseIssuing || 'غير متوفر'}</span></div>
+                <div><strong>نوع الرخصة: </strong><span>${record.ltype || 'غير متوفر'}</span></div>
+                <div><strong>حالة المنشأة: </strong><span>${record.facility_status || 'غير متوفر'}</span></div>
+                <div><strong>الوحدة: </strong><span>${record.unit || 'غير متوفر'}</span></div>
+                <div><strong>SHJHSP: </strong><span>${record.shjhsp || 'غير متوفر'}</span></div>
+                <div><strong>درجة الخطورة: </strong><span>${record.hazard_class || 'غير متوفر'}</span></div>
+                <div><strong>الأنشطة التفصيلية: </strong><span>${record.detailed_activities || 'غير متوفر'}</span></div>
+                <div><strong>الإحداثيات: </strong><span>${record.site_coordinates || 'غير متوفر'}</span></div>
+                <hr>
+                <h4 style="font-size:14px; color:var(--accent-blue);">آخر تفتيش:</h4>
+                <div><strong>تاريخ التفتيش: </strong><span>${record.latest_Inspectiondate || 'لا يوجد تاريخ'}</span></div>
+                <div><strong>الإجراء: </strong><span>${record.latest_Action || 'لا يوجد إجراء'}</span></div>
+                <div><strong>نوع التفتيش: </strong><span>${record.latest_InspectionType || 'غير محدد'}</span></div>
+                <div><strong>درجة التقييم: </strong><span>${record.latest_EvaluationResult || 'غير محدد'}</span></div>
+                <div><strong>مدة التحذير: </strong><span>${record.latest_WarningPeriod || 'غير محدد'}</span></div>
+                <div><strong>ملاحظات: </strong><span>${record.latest_Notes || 'لا يوجد ملاحظات'}</span></div>
+                <div><strong>رقم المفتش: </strong><span>${record.latest_InspectorID || 'غير محدد'}</span></div>
+            `;
+            $('#info-details-container').html(infoHtml);
+            $('#whatsapp-btn').off('click').on('click', () => sendWhatsApp(record.facility_ID));
+            $('#email-btn').off('click').on('click', () => sendEmail(record.facility_ID));
+            $('#location-btn').off('click').on('click', () => openLocation(record.facility_ID));
+            $('#edit-data-btn').off('click').on('click', () => openEditEstablishmentForm(record.facility_unq_id));
+            $('#add-inspection-btn').off('click').on('click', () => openAddEditInspectionForm(record.facility_unq_id));
+            $('#delete-establishment-btn').off('click').on('click', () => deleteEstablishment(record.facility_unq_id));
+            $.getJSON('get_inspections.php?facility_unq_id=' + record.facility_unq_id, function(data) {
+                if(data.success && data.data && data.data.length) {
+                    let year = (new Date).getFullYear()+'';
+                    let visits = data.data.filter(x => x.date && x.date.startsWith(year));
+                    let html = '<h5 style="font-size:13px; color:var(--accent-blue);">زيارات هذا العام:</h5><ul style="padding-right:20px; margin-top:5px; list-style-type: disc;">';
+                    visits.forEach(v => html += `<li>${v.date} - ${v.action || ''}</li>`);
+                    html += '</ul>';
+                    $('#previous-inspections').html(html);
+                } else {
+                    $('#previous-inspections').html('<div style="font-size:13px; color:#666;">لا توجد زيارات خلال العام الحالي.</div>');
+                }
+            });
+        }
+        function filterPoints() {
+            console.log("filterPoints called."); // Debug log
+            var selectedActions = Array.from(document.querySelectorAll('#action-filters input[type="checkbox"].action-filter:checked')).map(cb => cb.value);
+            var selectedActivities = Array.from(document.querySelectorAll('#activity-filters input[type="checkbox"].activity-filter:checked')).map(cb => cb.value);
+            var selectedLicenseIssuing = Array.from(document.querySelectorAll('#license-issuing-filters input[type="checkbox"].license-issuing-filter:checked')).map(cb => cb.value);
+            var selectedLtype = Array.from(document.querySelectorAll('#ltype-filters input[type="checkbox"].ltype-filter:checked')).map(cb => cb.value);
+            var selectedFacilityStatus = Array.from(document.querySelectorAll('#facility-status-filters input[type="checkbox"].facility-status-filter:checked')).map(cb => cb.value);
+            var selectedUnit = Array.from(document.querySelectorAll('#unit-filters input[type="checkbox"].unit-filter:checked')).map(cb => cb.value);
+            var selectedShjhsp = Array.from(document.querySelectorAll('#shjhsp-filters input[type="checkbox"].shjhsp-filter:checked')).map(cb => cb.value);
+            var selectedHazardClass = Array.from(document.querySelectorAll('#hazard-class-filters input[type="checkbox"].hazard-class-filter:checked')).map(cb => cb.value);
+            var searchText = $('#main-search-box').val() ? $('#main-search-box').val().toLowerCase() : '';
+            const {from, to} = getDateRangeFilterValues();
+            const showAllFacilities = $('#show-all-facilities').is(':checked');
 
-</script>
+            console.log("Filtering points with:");
+            console.log("  Selected Actions:", selectedActions);
+            console.log("  Selected Activities:", selectedActivities);
+            console.log("  Search Text:", searchText);
+            console.log("  Date Range:", from, to);
+            console.log("  Show All Facilities:", showAllFacilities);
 
+            var filteredPoints = allRecords.filter(function(point) {
+                var actionMatch = selectedActions.length === 0 ||
+                    (point.latest_Action && selectedActions.some(selAction => point.latest_Action.split(',').map(a=>a.trim()).includes(selAction)));
+                var activityMatch = selectedActivities.length === 0 ||
+                    (point.activity_type && selectedActivities.includes(point.activity_type));
+                var licenseIssuingMatch = selectedLicenseIssuing.length === 0 ||
+                    (point.LicenseIssuing && selectedLicenseIssuing.includes(point.LicenseIssuing));
+                var ltypeMatch = selectedLtype.length === 0 ||
+                    (point.ltype && selectedLtype.includes(point.ltype));
+                var facilityStatusMatch = selectedFacilityStatus.length === 0 ||
+                    (point.facility_status && selectedFacilityStatus.includes(point.facility_status));
+                var unitMatch = selectedUnit.length === 0 ||
+                    (point.unit && selectedUnit.includes(point.unit));
+                var shjhspMatch = selectedShjhsp.length === 0 ||
+                    (point.shjhsp && selectedShjhsp.includes(point.shjhsp));
+                var hazardClassMatch = selectedHazardClass.length === 0 ||
+                    (point.hazard_class && selectedHazardClass.includes(point.hazard_class));
+                var searchMatch = searchText === '' ||
+                    (point.license_no && String(point.license_no).toLowerCase().includes(searchText)) ||
+                    (point.facility_name && point.facility_name.toLowerCase().includes(searchText));
+                let inspectionDate = point.latest_Inspectiondate || '';
+                let inDateRange = true;
+                if(from) inDateRange = inspectionDate >= from;
+                if(to && inDateRange) inDateRange = inspectionDate <= to;
+                let isInspected = !!inspectionDate;
+                let facilityMatch = showAllFacilities ? true : isInspected;
+
+                // console.log(`  Point ${point.facility_name}: Action Match: ${actionMatch}, Activity Match: ${activityMatch}, Search Match: ${searchMatch}, Date Range Match: ${inDateRange}, Facility Match: ${facilityMatch}`);
+
+                return actionMatch && activityMatch && licenseIssuingMatch && ltypeMatch &&
+                facilityStatusMatch && unitMatch && shjhspMatch && hazardClassMatch && searchMatch && inDateRange && facilityMatch;
+            });
+            renderPoints(filteredPoints);
+            reFilterAll(); // Re-render filters based on currently *displayed* points counts
+            console.log("filterPoints finished."); // Debug log
+        }
+        function fetchAndRenderPoints() {
+            console.log("fetchAndRenderPoints called. Attempting to fetch data from get_map_data.php"); // Debug log
+            fetch('get_map_data.php')
+            .then(response => {
+                console.log("Response received from get_map_data.php. Status:", response.status); // Debug log
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log("Data successfully parsed:", data); // Debug log
+                if (data.success) {
+                    allRecords = data.data;
+                    console.log("Total records loaded:", allRecords.length); // Debug log
+                    renderPoints(allRecords);
+                    reFilterAll();
+                } else {
+                    showNotification('فشل جلب بيانات الخريطة: ' + (data.msg || 'خطأ غير معروف'), 'error');
+                    console.error("Failed to fetch map data:", data.msg); // Debug log
+                }
+            })
+            .catch(error => {
+                showNotification('خطأ في الاتصال بالخادم لجلب بيانات الخريطة: ' + error.message, 'error');
+                console.error("Fetch error for get_map_data.php:", error); // Debug log
+            });
+        }
+        function getDateRangeFilterValues() {
+            let from = $('#inspection-date-from').val();
+            let to = $('#inspection-date-to').val();
+            return {from, to};
+        }
+        function getUniqueFilteredSet(field) {
+            let values = new Set();
+            filteredRecords.forEach(record => {
+                if (field === 'latest_Action' && record.latest_Action) {
+                    record.latest_Action.split(',').map(a => a.trim()).forEach(action => values.add(action));
+                }
+                else if (record[field]) values.add(record[field]);
+            });
+            return values;
+        }
+        function createFilterCheckboxes(containerId, valuesSet, className, dataField = null, colorFunction = null) {
+            console.log("createFilterCheckboxes called for:", containerId); // Debug log
+            const container = document.getElementById(containerId);
+            // Capture currently checked values BEFORE clearing the container
+            const checkedValues = Array.from(container.querySelectorAll(`input[type="checkbox"].${className}:checked`)).map(cb => cb.value);
+            
+            container.innerHTML = ''; // Clear container
+
+            // Add "Select All" checkbox
+            const selectAllLabel = document.createElement('label');
+            const selectAllCheckbox = document.createElement('input');
+            selectAllCheckbox.type = 'checkbox';
+            selectAllCheckbox.className = 'select-all-filter';
+            selectAllCheckbox.value = 'all';
+            // Set initial state of "Select All" based on previously checked items
+            selectAllCheckbox.checked = (checkedValues.length > 0 && checkedValues.length === Array.from(valuesSet).length) || (checkedValues.length === 0 && valuesSet.size === 0);
+
+            selectAllCheckbox.onchange = function() {
+                console.log("Select All checkbox changed for", containerId, "to:", this.checked); // Debug log
+                const checkboxes = container.querySelectorAll(`.${className}`);
+                checkboxes.forEach(cb => { cb.checked = this.checked; });
+                filterPoints(); // Trigger filter after selecting/deselecting all
+            };
+            selectAllLabel.appendChild(selectAllCheckbox);
+            selectAllLabel.appendChild(document.createTextNode('تحديد الكل'));
+            container.appendChild(selectAllLabel);
+
+            const counts = {};
+            filteredRecords.forEach(record => {
+                if (dataField === 'latest_Action' && record.latest_Action) {
+                    record.latest_Action.split(',').map(a => a.trim()).forEach(action => {
+                        counts[action] = (counts[action] || 0) + 1;
+                    });
+                } else if (record[dataField]) {
+                    counts[record[dataField]] = (counts[record[dataField]] || 0) + 1;
+                }
+            });
+            
+            // Add individual filter options
+            Array.from(valuesSet).sort().forEach(value => {
+                const label = document.createElement('label');
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = className;
+                checkbox.value = value;
+                // Restore checked state for individual checkboxes
+                if (checkedValues.includes(value)) checkbox.checked = true;
+                
+                label.appendChild(checkbox);
+                if (colorFunction) {
+                    const colorDot = document.createElement('span');
+                    colorDot.className = 'color-dot';
+                    colorDot.style.backgroundColor = colorFunction(value);
+                    label.appendChild(colorDot);
+                }
+                const count = counts[value] || 0;
+                label.appendChild(document.createTextNode(`${value} (${count})`));
+                container.appendChild(label);
+            });
+            // Attach a single delegated event listener for all checkboxes in this container
+            $('#' + containerId).off('change').on('change', `.${className}`, function() {
+                console.log("Individual filter checkbox changed for", containerId, "value:", this.value, "checked:", this.checked); // Debug log
+                filterPoints(); // Trigger filter when any individual checkbox changes
+                const allSpecificCheckboxes = document.querySelectorAll(`#${containerId} .${className}`);
+                const checkedSpecificCheckboxes = document.querySelectorAll(`#${containerId} .${className}:checked`);
+                const selectAllCheckbox = document.querySelector(`#${containerId} .select-all-filter`);
+                if (allSpecificCheckboxes.length > 0 && checkedSpecificCheckboxes.length === allSpecificCheckboxes.length) {
+                    selectAllCheckbox.checked = true;
+                } else {
+                    selectAllCheckbox.checked = false;
+                }
+            });
+        }
+        function reFilterAll() {
+            console.log("reFilterAll called."); // Debug log
+            createFilterCheckboxes('action-filters', getUniqueFilteredSet('latest_Action'), 'action-filter', 'latest_Action', getActionColor);
+            createFilterCheckboxes('activity-filters', getUniqueFilteredSet('activity_type'), 'activity-filter', 'activity_type', getActivityColor);
+            createFilterCheckboxes('license-issuing-filters', getUniqueFilteredSet('LicenseIssuing'), 'license-issuing-filter', 'LicenseIssuing');
+            createFilterCheckboxes('ltype-filters', getUniqueFilteredSet('ltype'), 'ltype-filter', 'ltype');
+            createFilterCheckboxes('facility-status-filters', getUniqueFilteredSet('facility_status'), 'facility-status-filter', 'facility_status');
+            createFilterCheckboxes('unit-filters', getUniqueFilteredSet('unit'), 'unit-filter', 'unit');
+            createFilterCheckboxes('shjhsp-filters', getUniqueFilteredSet('shjhsp'), 'shjhsp-filter', 'shjhsp');
+            createFilterCheckboxes('hazard-class-filters', getUniqueFilteredSet('hazard_class'), 'hazard-class-filter', 'hazard_class');
+        }
+        function renderCharts() {
+            console.log("renderCharts called."); // Debug log
+            $('#charts-container').empty();
+            const filters = [
+                { key: 'activity_type', label: 'الأنشطة' },
+                { key: 'area', label: 'المناطق' },
+                { key: 'LicenseIssuing', label: 'جهة الإصدار' },
+                { key: 'ltype', label: 'نوع الرخصة' },
+                { key: 'facility_status', label: 'حالة المنشأة' },
+                { key: 'unit', label: 'الوحدة' },
+                { key: 'shjhsp', label: 'SHJHSP' },
+                { key: 'hazard_class', label: 'درجة الخطورة' }
+            ];
+            filters.forEach(f => {
+                let dataMap = {};
+                filteredRecords.forEach(rec => {
+                    const fval = rec[f.key] || 'غير محدد';
+                    if (!dataMap[fval]) dataMap[fval] = {};
+                    if (rec.latest_Action) {
+                        rec.latest_Action.split(',').map(a=>a.trim()).forEach(action => {
+                            dataMap[fval][action] = (dataMap[fval][action]||0)+1;
+                        });
+                    }
+                });
+                let labels = Object.keys(dataMap);
+                let actionTypes = Array.from(new Set([].concat(...labels.map(l => Object.keys(dataMap[l])))));
+                let datasets = actionTypes.map(act => ({
+                    label: act,
+                    backgroundColor: colorForAction(act),
+                    data: labels.map(l => dataMap[l][act]||0)
+                }));
+                let chartId = `${f.key}Chart`;
+                $('#charts-container').append(`
+                    <div style="margin-bottom: 25px;">
+                        <h4 style="font-size:14px; margin-bottom:12px; border-bottom: 1px solid #eee; padding-bottom: 8px;">توزيع الإجراءات حسب ${f.label}</h4>
+                        <canvas id="${chartId}" style="height: 200px; width: 100%;"></canvas>
+                    </div>
+                `);
+                let ctx = document.getElementById(chartId).getContext('2d');
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: datasets
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'top', labels: { font: { size: 12, family: 'Cairo' } } },
+                            datalabels: {
+                                display: true,
+                                color: '#222',
+                                font: {weight:'bold',size:10, family: 'Cairo'},
+                                anchor: 'end',
+                                align: 'top',
+                                formatter: (value, ctx) => value > 0 ? value : ''
+                            }
+                        },
+                        scales: {
+                            y: { beginAtZero: true, ticks: { font: { size: 11, family: 'Cairo' }, color: '#555'} },
+                            x: { ticks: { font: { size: 10, family: 'Cairo' }, color: '#555'} }
+                        }
+                    },
+                    plugins: [ChartDataLabels]
+                });
+            });
+            console.log("Charts rendered."); // Debug log
+        }
+        function printChartReport() {
+            console.log("printChartReport called."); // Debug log
+            let w = window.open('', '', 'width=900,height=900');
+            w.document.write('<style>@import url("https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap"); body { font-family: "Cairo", sans-serif; direction: rtl; }</style>');
+            w.document.write('<h2 style="font-size:20px; text-align: center; color:var(--accent-blue); margin-top: 20px;">تقرير الرسوم البيانية للمنشآت</h2>');
+            $('#charts-container canvas').each(function(){
+                w.document.write('<div style="margin-bottom:30px; page-break-inside: avoid;"><img src="' + this.toDataURL() + '" style="max-width:95vw; border: 1px solid #ddd; padding: 5px; background: #fff;"/></div>');
+            });
+            setTimeout(()=>{
+                console.log("Calling window.print() for chart report."); // Debug log
+                w.print();
+            }, 400);
+        }
+        function printAllFilteredRecords() {
+            console.log("printAllFilteredRecords called."); // Debug log
+            if (!filteredRecords.length) {
+                showNotification("لا توجد بيانات (مفلترة) للطباعة.", 'error');
+                console.warn("No filtered records to print."); // Debug log
+                return;
+            }
+            let printContent = `
+                <div class="report-header">
+                    <img src="shjmunlogo.png" alt="شعار بلدية الشارقة" />
+                    <div>
+                        <div class="report-title">قسم الرقابة الصحية - تقرير بيانات المنشآت</div>
+                        <div style="font-size:14px;color:#666;">عدد المنشآت: <b>${filteredRecords.length}</b></div>
+                        <div style="font-size:11px;color:#444;">تاريخ التقرير: ${new Date().toLocaleDateString('ar-AE')}</div>
+                    </div>
+                </div>
+                <table class="report-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>اسم المنشأة</th>
+                            <th>المنطقة</th>
+                            <th>النشاط</th>
+                            <th>الإجراء</th>
+                            <th>تاريخ آخر تفتيش</th>
+                            <th>رقم الرخصة</th>
+                            <th>جهة الإصدار</th>
+                            <th>نوع الرخصة</th>
+                            <th>حالة المنشأة</th>
+                            <th>الوحدة</th>
+                            <th>SHJHSP</th>
+                            <th>درجة الخطورة</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            filteredRecords.forEach((record, index) => {
+                // لون الإجراء حسب الأولوية
+                let bgAction = getActionColor(record.latest_Action);
+                printContent += `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td>${record.facility_name || ''}</td>
+                        <td>${record.area || ''}</td>
+                        <td>${record.activity_type || ''}</td>
+                        <td style="background:${bgAction};color:#fff;font-weight:bold;">${record.latest_Action || ''}</td>
+                        <td>${record.latest_Inspectiondate || ''}</td>
+                        <td>${record.license_no || ''}</td>
+                        <td>${record.LicenseIssuing || ''}</td>
+                        <td>${record.ltype || ''}</td>
+                        <td>${record.facility_status || ''}</td>
+                        <td>${record.unit || ''}</td>
+                        <td>${record.shjhsp || ''}</td>
+                        <td>${record.hazard_class || ''}</td>
+                    </tr>
+                `;
+            });
+            printContent += '</tbody></table>';
+            const printArea = document.getElementById('print-area');
+            printArea.innerHTML = printContent;
+            console.log("Generated print content and set to print-area."); // Debug log
+            window.print();
+            console.log("window.print() called for data report."); // Debug log
+        }
+        function sendWhatsApp(recordId) {
+            console.log("sendWhatsApp called for ID:", recordId); // Debug log
+            const record = allRecords.find(r => r.facility_ID == recordId);
+            if (!record) {
+                showNotification('لم يتم العثور على السجل لإرساله عبر واتساب.', 'error');
+                return;
+            }
+            const coords = record.site_coordinates ? record.site_coordinates.split(',').map(Number) : [null, null];
+            const googleMapsLink = (coords[0] && coords[1]) ? `https://www.google.com/maps/search/?api=1&query=$${coords[0]},${coords[1]}` : 'لا يوجد إحداثيات';
+            const text = encodeURIComponent(`
+*تفاصيل المنشأة:*
+- *الاسم:* ${record.facility_name || 'غير متوفر'}
+- *الرخصة:* ${record.license_no || 'غير متوفر'}
+- *المنطقة:* ${record.area || 'غير متوفر'}
+- *النشاط:* ${record.activity_type || 'غير متوفر'}
+- *آخر إجراء:* ${record.latest_Action || 'لا يوجد'}
+- *رابط الموقع:* ${googleMapsLink}
+`);
+            window.open(`https://wa.me/?text=${text}`, '_blank');
+            showNotification('تم فتح تطبيق واتساب لمشاركة البيانات.', 'success');
+        }
+        function sendEmail(recordId) {
+            console.log("sendEmail called for ID:", recordId); // Debug log
+            const record = allRecords.find(r => r.facility_ID == recordId);
+            if (!record) { showNotification('لم يتم العثور على السجل لإرساله عبر البريد الإلكتروني.', 'error'); return; }
+            const subject = encodeURIComponent(`معلومات منشأة: ${record.facility_name || 'غير متوفر'}`);
+            const coords = record.site_coordinates ? record.site_coordinates.split(',').map(Number) : [null, null];
+            const googleMapsLink = (coords[0] && coords[1]) ? `https://www.google.com/maps/search/?api=1&query=$${coords[0]},${coords[1]}` : 'لا يوجد إحداثيات';
+            const body = encodeURIComponent(`
+*تفاصيل المنشأة:*
+- *الاسم:* ${record.facility_name || 'غير متوفر'}
+- *الرخصة:* ${record.license_no || 'غير متوفر'}
+- *المنطقة:* ${record.area || 'غير متوفر'}
+- *النشاط:* ${record.activity_type || 'غير متوفر'}
+- *آخر إجراء:* ${record.latest_Action || 'لا يوجد'}
+- *رابط الموقع:* ${googleMapsLink}
+`);
+            window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+            showNotification('تم فتح تطبيق البريد الإلكتروني لمشاركة البيانات.', 'success');
+        }
+        function openLocation(recordId) {
+            console.log("openLocation called for ID:", recordId); // Debug log
+            const record = allRecords.find(r => r.facility_ID == recordId);
+            if (!record || !record.site_coordinates) {
+                showNotification('لا توجد إحداثيات متاحة لهذه المنشأة.', 'error');
+                return;
+            }
+            const coords = record.site_coordinates.split(',').map(Number);
+            if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+                const url = `https://www.google.com/maps/search/?api=1&query=$${coords[0]},${coords[1]}`;
+                window.open(url, '_blank');
+                showNotification('تم فتح الموقع الجغرافي في خرائط جوجل.', 'success');
+            } else {
+                showNotification('الإحداثيات غير صالحة لهذه المنشأة.', 'error');
+            }
+        }
+        function exportExcel() {
+            console.log("exportExcel called."); // Debug log
+            if (!filteredRecords.length) {
+                showNotification("لا توجد بيانات (مفلترة) للتصدير!", 'error');
+                console.warn("No filtered records to export."); // Debug log
+                return;
+            }
+            const headers = [
+                "ID", "رقم الرخصة", "جهة الإصدار", "نوع الرخصة", "Sub No", "Unique ID",
+                "اسم المنشأة", "المنطقة", "النشاط", "الأنشطة التفصيلية", "حالة المنشأة",
+                "الوحدة", "SHJHSP", "درجة الخطورة", "الإحداثيات", "العلامة التجارية",
+                "تاريخ بداية الرخصة", "تاريخ انتهاء الرخصة", "المستخدم", "حالة المنشأة (Status)",
+                "تاريخ آخر تفتيش", "الإجراء", "نوع التفتيش", "درجة التقييم",
+                "مدة التحذير", "ملاحظات", "رقم المفتش"
+            ];
+            const data = filteredRecords.map(record => [
+                record.facility_ID,
+                record.license_no,
+                record.LicenseIssuing,
+                record.ltype,
+                record.sub_no,
+                record.facility_unq_id,
+                record.facility_name,
+                record.area,
+                record.activity_type,
+                record.detailed_activities,
+                record.facility_status,
+                record.unit,
+                record.shjhsp,
+                record.hazard_class,
+                record.site_coordinates,
+                record.brand_name,
+                record.lstart_date,
+                record.lend_date,
+                record.user,
+                record.status,
+                record.latest_Inspectiondate,
+                record.latest_Action,
+                record.latest_InspectionType,
+                record.latest_EvaluationResult,
+                record.latest_WarningPeriod,
+                record.latest_Notes,
+                record.latest_InspectorID
+            ]);
+            const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "بيانات_المنشآت_المفلترة");
+            XLSX.writeFile(wb, "بيانات_المنشآت_المفلترة.xlsx");
+            showNotification('تم تصدير البيانات بنجاح إلى ملف Excel.', 'success');
+            console.log("Data exported to Excel."); // Debug log
+        }
+        function openNewEstablishmentForm() {
+            console.log("openNewEstablishmentForm called."); // Debug log
+            window.open('form_establishment.html', '_blank');
+            showNotification('جارٍ فتح نموذج إضافة منشأة جديدة.', 'info');
+        }
+        function openEditEstablishmentForm(unique_id) {
+            console.log("openEditEstablishmentForm called for ID:", unique_id); // Debug log
+            window.open(`form_establishment.html?unique_id=${unique_id}`, '_blank');
+            showNotification('جارٍ فتح نموذج تعديل بيانات المنشأة.', 'info');
+        }
+        function openAddEditInspectionForm(unique_id) {
+            console.log("openAddEditInspectionForm called for ID:", unique_id); // Debug log
+            window.open(`inspection_form.html?facility_unq_id=${unique_id}`, '_blank');
+            showNotification('جارٍ فتح نموذج إضافة/تعديل زيارة تفتيش.', 'info');
+        }
+        function deleteEstablishment(unique_id) {
+            console.log("deleteEstablishment called for ID:", unique_id); // Debug log
+            if (!confirm('هل أنت متأكد من حذف المنشأة؟ لا يمكن التراجع عن هذا الإجراء.')) return;
+            allRecords = allRecords.filter(r => r.facility_unq_id != unique_id);
+            filterPoints();
+            $('#info').hide();
+            showNotification('تم حذف المنشأة بنجاح.', 'success');
+            console.log("Establishment deleted from local records."); // Debug log
+            // In a real application, you would also send a request to a backend to delete the record from the database.
+        }
+
+        // Notification function (non-interactive)
+        function showNotification(message, type = 'info', duration = 3000) {
+            console.log(`Displaying notification: Type: ${type}, Message: ${message}`); // Debug log
+            const notification = $('#notification-popup');
+            notification.empty(); // Clear content for non-interactive
+            notification.text(message);
+            notification.removeClass('success error info').addClass(type).addClass('show');
+            setTimeout(() => {
+                notification.removeClass('show');
+            }, duration);
+        }
+
+        // Interactive Notification function
+        function showInteractiveNotification(message, confirmCallback, cancelCallback = null, duration = 15000) { // Increased duration for interactive
+            console.log("Displaying interactive notification."); // Debug log
+            const notification = $('#notification-popup');
+            notification.empty(); // Clear previous content
+            notification.append(`<div style="margin-bottom: 10px;">${message}</div>`);
+
+            const buttonContainer = $('<div style="display: flex; justify-content: center; gap: 10px;"></div>');
+            const confirmBtn = $('<button style="background-color: var(--primary-green); color: var(--text-light); border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer;">متابعة</button>');
+            const cancelBtn = $('<button style="background-color: #6c757d; color: var(--text-light); border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer;">إلغاء</button>');
+
+            confirmBtn.on('click', () => {
+                console.log("Interactive notification: Confirm clicked."); // Debug log
+                notification.removeClass('show');
+                if (confirmCallback) confirmCallback();
+            });
+
+            cancelBtn.on('click', () => {
+                console.log("Interactive notification: Cancel clicked."); // Debug log
+                notification.removeClass('show');
+                if (cancelCallback) cancelCallback();
+            });
+
+            buttonContainer.append(confirmBtn);
+            buttonContainer.append(cancelBtn); 
+            notification.append(buttonContainer);
+
+            notification.removeClass('success error info').addClass('info').addClass('show');
+            
+            // Auto-dismiss after duration if no interaction
+            setTimeout(() => {
+                if (notification.hasClass('show')) {
+                    console.log("Interactive notification auto-dismissed."); // Debug log
+                    notification.removeClass('show');
+                }
+            }, duration);
+        }
+
+        // Function to request notification permission
+        function requestNotificationPermission() {
+            console.log("requestNotificationPermission called."); // Debug log
+            if (!("Notification" in window)) {
+                console.warn("This browser does not support desktop notification");
+                showNotification('متصفحك لا يدعم الإشعارات.', 'error');
+            } else if (Notification.permission === "granted") {
+                console.log("Notification permission already granted.");
+                // No need to show notification, just log
+            } else if (Notification.permission !== "denied") {
+                Notification.requestPermission().then(function (permission) {
+                    if (permission === "granted") {
+                        showNotification('تم منح إذن الإشعارات بنجاح.', 'success');
+                        console.log("Notification permission granted by user."); // Debug log
+                    } else {
+                        showNotification('تم رفض إذن الإشعارات.', 'error');
+                        console.log("Notification permission denied by user."); // Debug log
+                    }
+                });
+            } else {
+                showNotification('إذن الإشعارات ممنوع. يرجى تفعيله يدويًا من إعدادات المتصفح.', 'error', 5000);
+                console.warn("Notification permission is denied and needs manual intervention."); // Debug log
+            }
+        }
+
+        // Helper function to add days to a date string (YYYY-MM-DD)
+        function addDaysToDate(dateString, days) {
+            if (!dateString) return null;
+            const date = new Date(dateString + 'T00:00:00'); // Use T00:00:00 to avoid timezone issues
+            date.setDate(date.getDate() + days);
+            return date.toISOString().split('T')[0]; // Format back toYYYY-MM-DD
+        }
+
+        // Function to check nearby warnings based on WarningPeriod expiration
+        function checkNearbyWarnings() {
+            console.log("checkNearbyWarnings called."); // Debug log
+            if (Notification.permission !== "granted") {
+                showNotification('يرجى تمكين إشعارات المتصفح أولاً للتحقق من التحذيرات.', 'error', 5000);
+                requestNotificationPermission(); // Prompt for permission again
+                return;
+            }
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0); // Normalize to start of day for comparison
+            let foundWarningThisRun = false;
+
+            filteredRecords.forEach(point => {
+                const inspectionDateStr = point.latest_Inspectiondate;
+                const warningPeriod = parseInt(point.latest_WarningPeriod);
+
+                // Check if the point has an 'انذار' (warning) action
+                const actions = point.latest_Action ? point.latest_Action.split(',').map(a => a.trim()) : [];
+                
+                // Proceed only if it's an 'انذار', has an inspection date, and a valid warning period
+                if (actions.includes('انذار') && inspectionDateStr && !isNaN(warningPeriod)) {
+                    const triggerDateStr = addDaysToDate(inspectionDateStr, warningPeriod);
+                    const triggerDate = new Date(triggerDateStr + 'T00:00:00'); // Ensure triggerDate is also start of day
+                    
+                    console.log(`--- Checking Facility: ${point.facility_name} ---`);
+                    console.log(`  Inspection Date: ${inspectionDateStr}`);
+                    console.log(`  Warning Period: ${warningPeriod} days`);
+                    console.log(`  Calculated Trigger Date (str): ${triggerDateStr}`);
+                    console.log(`  Calculated Trigger Date (ms): ${triggerDate.getTime()}`);
+                    console.log(`  Today (ms): ${today.getTime()}`);
+                    console.log(`  Is today >= trigger date? : ${today.getTime() >= triggerDate.getTime()}`);
+                    console.log(`  Already notified? : ${notified.has(point.facility_unq_id)}`);
+                    console.log(`  Condition met (today >= trigger && !notified)? : ${today.getTime() >= triggerDate.getTime() && !notified.has(point.facility_unq_id)}`);
+
+                    if (today.getTime() >= triggerDate.getTime() && !notified.has(point.facility_unq_id)) {
+                        foundWarningThisRun = true;
+                        const msg = `
+📍 الاسم: ${point.facility_name || 'غير متوفر'}
+📍 المنطقة: ${point.area || 'غير متوفر'}
+📄 الرخصة: ${point.license_no || 'غير متوفر'}
+📅 تاريخ آخر زيارة: ${inspectionDateStr || 'غير متوفر'}
+⚠️ انتهت فترة التحذير (${warningPeriod} أيام).
+                        `;
+                        
+                        showInteractiveNotification(msg + "<br>هل ترغب بالمتابعة الآن؟",
+                            () => { // Confirm callback
+                                if (point.site_coordinates) {
+                                    const coords = point.site_coordinates.split(',').map(Number);
+                                    if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+                                        const mapUrl = `https://www.google.com/maps/search/?api=1&query=$${coords[0]},${coords[1]}`;
+                                        window.open(mapUrl, '_blank');
+                                        showNotification('تم فتح خرائط جوجل للمتابعة.', 'success');
+                                    } else {
+                                        showNotification('الإحداثيات غير صالحة لهذه المنشأة.', 'error');
+                                    }
+                                } else {
+                                    showNotification('لا توجد إحداثيات متاحة لهذه المنشأة.', 'error');
+                                }
+                            },
+                            () => { // Cancel callback
+                                showNotification('تم إلغاء المتابعة.', 'info');
+                            }
+                        );
+                        notified.add(point.facility_unq_id); // Add to set to prevent repeat notifications for same facility
+                    }
+                }
+            });
+
+            if (!foundWarningThisRun) {
+                showNotification('لا توجد تحذيرات جديدة انتهت مدتها.', 'info');
+            }
+            console.log("checkNearbyWarnings finished."); // Debug log
+        }
+
+        // Keeping these functions as they might be used elsewhere or for future features,
+        // even though checkNearbyWarnings no longer uses them for its primary logic.
+        function getDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // metres
+            const φ1 = lat1 * Math.PI / 180; // φ, λ in radians
+            const φ2 = lat2 * Math.PI / 180;
+            const Δφ = (lat2 - lat1) * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+            const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+            return R * c; // in meters
+        }
+
+        function getDrivingTimeInMinutes(distanceMeters) {
+            const mode = document.getElementById("mode").value;
+            let speedMetersPerMinute;
+
+            if (mode === 'car') {
+                const now = new Date();
+                const hour = now.getHours();
+                const minute = now.getMinutes();
+                const currentTimeInMinutes = hour * 60 + minute;
+
+                const isRushHour =
+                    (currentTimeInMinutes >= 7 * 60 && currentTimeInMinutes <= 10 * 60) ||   // 7:00 AM to 10:00 AM
+                    (currentTimeInMinutes >= 14.5 * 60 && currentTimeInMinutes <= 22 * 60);   // 2:30 PM to 10:00 PM
+
+                speedMetersPerMinute = isRushHour ? 166.67 : 333.33; // 10 km/h or 20 km/h
+            } else {
+                speedMetersPerMinute = 83.33; // Walking speed: 5 km/h
+            }
+
+            return distanceMeters / speedMetersPerMinute; // in minutes
+        }
+
+        $(document).ready(function() {
+            console.log("Document ready. Initializing..."); // Debug log
+            fetchAndRenderPoints();
+            $('#main-search-box').on('input', filterPoints);
+            $('#inspection-date-from, #inspection-date-to, #show-all-facilities').on('change', filterPoints);
+            $('.filter-content').hide();
+            $('#charts-panel, #controls, #info').hide(); // Ensure all panels are hidden by default
+            console.log("Initial panel states set to hidden."); // Debug log
+
+            // Toggle buttons for panels using the unified showPanel function
+            $("#toggleControlsBtn").click(function(){
+                console.log("toggleControlsBtn clicked."); // Debug log
+                showPanel('controls');
+            });
+            $("#toggleChartsBtn").click(function(){
+                console.log("toggleChartsBtn clicked."); // Debug log
+                renderCharts(); // Render charts always before showing the panel
+                showPanel('charts-panel');
+            });
+            $("#toggleInfoBtn").click(function(){
+                console.log("toggleInfoBtn clicked."); // Debug log
+                showPanel('info');
+            });
+            console.log("Event listeners bound for main controls and filters."); // Debug log
+        });
+    </script>
 </body>
 </html>
