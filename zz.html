@@ -1516,6 +1516,18 @@ $(document).ready(function() {
         }
     });
 });
-    </script>
+$('#toggleControlsBtn').on('click', function() {
+    $('#controls').toggle();
+    $('#charts-panel, #info').hide();
+});
+$('#toggleChartsBtn').on('click', function() {
+    $('#charts-panel').toggle();
+    $('#controls, #info').hide();
+});
+$('#toggleInfoBtn').on('click', function() {
+    $('#info').toggle();
+    $('#controls, #charts-panel').hide();
+});
+</script>
 </body>
 </html>
