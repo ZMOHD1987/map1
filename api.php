@@ -1,0 +1,805 @@
+<?php
+// تفعيل التخزين المؤقت للإخراج لالتقاط أي إخراج مبكر أو أخطاء
+ob_start();
+
+// عرض الأخطاء البرمجية للمساعدة في التصحيح (يفضل إزالتها في الإنتاج)
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+// رؤوس CORS (Cross-Origin Resource Sharing) للسماح بطلبات من نطاقات مختلفة
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+
+// تضمين ملف اتصال قاعدة البيانات
+require_once 'db.php';
+
+// Function to calculate inspection results
+function calculateInspectionResults($inspectionId, $conn, $updatedByUserId = null) {
+    // 1. Get total deducted points and total violation value for this inspection
+    $stmt = $conn->prepare("SELECT SUM(deducted_points) AS total_deducted_points, SUM(violation_value) AS total_violation_value FROM tbl_inspection_items WHERE inspection_id = ?");
+    $stmt->bind_param("i", $inspectionId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    $totalDeductedPoints = $row['total_deducted_points'] ?? 0.00;
+    $totalViolationValue = $row['total_violation_value'] ?? 0.00; // Added total_violation_value
+    $stmt->close();
+
+    // 2. Get the establishment's hazard class, Sub_Sector, and the inspection_date
+    $hazardClass = null;
+    $establishmentSubSector = null; // New field for Sub_Sector
+    $currentInspectionDate = null;
+    $stmt = $conn->prepare("SELECT e.hazard_class, e.Sub_Sector, i.inspection_date FROM tbl_inspections i JOIN establishments e ON i.facility_unique_id = e.unique_id WHERE i.inspection_id = ?");
+    $stmt->bind_param("i", $inspectionId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result->fetch_assoc();
+    if ($row) {
+        $hazardClass = $row['hazard_class'];
+        $establishmentSubSector = $row['Sub_Sector'];
+        $currentInspectionDate = $row['inspection_date'];
+    }
+    $stmt->close();
+
+    // Get WorkMod from Sectors table based on Sub_Sector
+    $workMod = null;
+    if ($establishmentSubSector) {
+        $stmt = $conn->prepare("SELECT WorkMod FROM Sectors WHERE SectorID = ?");
+        $stmt->bind_param("i", $establishmentSubSector);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $sectorRow = $result->fetch_assoc();
+        if ($sectorRow) {
+            $workMod = $sectorRow['WorkMod'];
+        }
+        $stmt->close();
+    }
+
+    $baseScore = 1000.00;
+
+    $finalInspectionScore = max(0, $baseScore - $totalDeductedPoints);
+    $percentageScore = ($baseScore > 0) ? ($finalInspectionScore / $baseScore) * 100 : 0;
+
+    $letterGrade = '';
+    $colorCard = '';
+
+    if ($percentageScore >= 95) {
+        $letterGrade = 'A+';
+        $colorCard = 'أخضر داكن';
+    } elseif ($percentageScore >= 90) {
+        $letterGrade = 'A';
+        $colorCard = 'أخضر';
+    } elseif ($percentageScore >= 75) {
+        $letterGrade = 'B';
+        $colorCard = 'أخضر فاتح';
+    } elseif ($percentageScore >= 60) {
+        $letterGrade = 'C';
+        $colorCard = 'أصفر';
+    } elseif ($percentageScore >= 45) {
+        $letterGrade = 'D';
+        $colorCard = 'برتقالي';
+    } else {
+        $letterGrade = 'E';
+        $colorCard = 'أحمر';
+    }
+
+    // Calculate Next Inspection Date based on hazard_class, letter_grade, and WorkMod
+    $nextInspectionDate = null;
+    $baseDate = null;
+
+    if ($currentInspectionDate) {
+        $baseDate = new DateTime($currentInspectionDate);
+    } else {
+        $baseDate = new DateTime();
+    }
+
+    $frequencyDays = null;
+    // Step 1: Get recommended frequency days from your "Inspection Frequency" rules table
+    // Assuming a table named 'tbl_inspection_frequency_rules' with columns: hazard_class, letter_grade, frequency_days
+    $stmt_freq = $conn->prepare("SELECT frequency_days FROM tbl_inspection_frequency_rules WHERE hazard_class = ? AND letter_grade = ?");
+    if ($stmt_freq) {
+        $stmt_freq->bind_param("ss", $hazardClass, $letterGrade);
+        $stmt_freq->execute();
+        $result_freq = $stmt_freq->get_result();
+        $row_freq = $result_freq->fetch_assoc();
+        if ($row_freq) {
+            $frequencyDays = $row_freq['frequency_days'];
+        }
+        $stmt_freq->close();
+    }
+
+    // Default frequencies if not found in table or for specific cases
+    if ($colorCard === 'أحمر') {
+        $frequencyDays = 20; // Specific for 'أحمر' card
+    } elseif (is_null($frequencyDays)) {
+        // Fallback to hazard_class logic if no specific rule found for letter grade
+        switch ($hazardClass) {
+            case 'Very-high': $frequencyDays = 30; break; // 1 month
+            case 'High':      $frequencyDays = 90; break; // 3 months
+            case 'Medium':    $frequencyDays = 180; break; // 6 months
+            case 'Low':       $frequencyDays = 365; break; // 12 months
+            case 'Very-Low':  $frequencyDays = 730; break; // 24 months
+            default:          $frequencyDays = 90; // Default for undefined hazard class
+        }
+    }
+    
+    // Step 2: Calculate actual next inspection date respecting WorkMod
+    if ($frequencyDays !== null) {
+        $daysAdded = 0;
+        $workDaysPerCycle = 0;
+        $restDaysPerCycle = 0;
+
+        if ($workMod) {
+            list($workDaysPerCycle, $restDaysPerCycle) = array_map('intval', explode(',', $workMod));
+        }
+
+        // Loop to add days, skipping rest days based on WorkMod
+        while ($daysAdded < $frequencyDays) {
+            $baseDate->modify('+1 day');
+            $dayOfWeek = (int)$baseDate->format('N'); // 1 (Monday) to 7 (Sunday)
+
+            // Assume standard UAE weekend: Friday (5) and Saturday (6) if WorkMod is 5,2
+            // Or if WorkMod is 7,0, no rest days are skipped in this logic.
+            // If WorkMod defines specific rest days of the week, this logic needs adjustment.
+            // For simplicity, let's assume WorkMod '5,2' implies standard Fri-Sat weekend.
+            // If it's a rolling cycle, this logic needs to be much more complex.
+            
+            $isRestDay = false;
+            if ($workMod === '7,0') { // 7 working days, 0 rest days
+                $isRestDay = false;
+            } elseif ($workMod === '5,2') { // 5 working days, 2 rest days (typical work week)
+                if ($dayOfWeek == 5 || $dayOfWeek == 6) { // Friday or Saturday (adjust based on your region's actual weekend)
+                    $isRestDay = true;
+                }
+            }
+            // Add more conditions for other WorkMod values if they define different fixed rest days.
+            // For '4,2', it would skip the 5th and 6th day in a 6-day cycle. This is more complex to implement without more specific rules.
+            // For now, only 7,0 and 5,2 are handled robustly based on common interpretation.
+            
+            if (!$isRestDay) {
+                $daysAdded++;
+            }
+        }
+        $nextInspectionDate = $baseDate->format('Y-m-d');
+    } else {
+        $nextInspectionDate = null; // No frequency defined
+    }
+
+    // Update inspection record with results
+    $updateStmtQuery = "UPDATE tbl_inspections SET total_deducted_points = ?, final_inspection_score = ?, percentage_score = ?, letter_grade = ?, color_card = ?, next_inspection_date = ?, total_violation_value = ?";
+    $updateTypes = "ddssssd";
+    $updateParams = [&$totalDeductedPoints, &$finalInspectionScore, &$percentageScore, &$letterGrade, &$colorCard, &$nextInspectionDate, &$totalViolationValue];
+
+    if ($updatedByUserId !== null) {
+        $updateStmtQuery .= ", updated_by_user_id = ?";
+        $updateTypes .= "i";
+        $updateParams[] = &$updatedByUserId;
+    }
+
+    $updateStmtQuery .= " WHERE inspection_id = ?";
+    $updateTypes .= "i";
+    $updateParams[] = &$inspectionId;
+
+    $stmt = $conn->prepare($updateStmtQuery);
+    if (!$stmt) {
+        error_log("Error preparing update inspection results statement: " . $conn->error);
+        return false;
+    }
+    
+    // Bind parameters dynamically
+    call_user_func_array([$stmt, 'bind_param'], array_merge([$updateTypes], $updateParams));
+
+    $stmt->execute();
+    $stmt->close();
+
+    // Get violation counts by category
+    $stmt = $conn->prepare("
+        SELECT tic.code_category, COUNT(tii.code_id) AS violation_count
+        FROM tbl_inspection_items tii
+        JOIN tbl_inspection_code tic ON tii.code_id = tic.code_id
+        WHERE tii.inspection_id = ? AND tii.is_violation = 1
+        GROUP BY tic.code_category
+    ");
+    $stmt->bind_param("i", $inspectionId);
+    $stmt->execute();
+    $categoryCounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+
+    $criticalViolations = 0;
+    $majorViolations = 0;
+    $generalViolations = 0;
+
+    foreach ($categoryCounts as $cat) {
+        if ($cat['code_category'] === 'Critical') { // Assuming 'Critical' maps to 'كوارث صحية' or similar
+            $criticalViolations = $cat['violation_count'];
+        } elseif ($cat['code_category'] === 'Major') { // Assuming 'Major' maps to 'مخالفة رئيسية'
+            $majorViolations = $cat['violation_count'];
+        } elseif ($cat['code_category'] === 'General') { // Assuming 'General' maps to 'مخالفة عامة'
+            $generalViolations = $cat['violation_count'];
+        }
+    }
+
+    return [
+        'total_deducted_points' => $totalDeductedPoints,
+        'final_inspection_score' => $finalInspectionScore,
+        'percentage_score' => $percentageScore,
+        'letter_grade' => $letterGrade,
+        'color_card' => $colorCard,
+        'next_inspection_date' => $nextInspectionDate,
+        'critical_violations' => $criticalViolations,
+        'major_violations' => $majorViolations,
+        'general_violations' => $generalViolations,
+        'total_violation_value' => $totalViolationValue // Return total violation value
+    ];
+}
+
+// نقطة الدخول لطلبات AJAX
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // هذا السطر يضمن أن أي استجابة لطلب POST ستكون JSON، حتى لو حدث خطأ
+    header('Content-Type: application/json; charset=UTF-8');
+
+    $action = $_POST['action'] ?? '';
+    $response_data = ['success' => false, 'message' => 'إجراء غير صالح.']; // تعريف استجابة افتراضية
+
+    // Get logged-in user ID (assuming it's passed or available via session)
+    // For now, using a placeholder, ideally from a session variable $_SESSION['user_id']
+    $loggedInUserId = $_POST['logged_in_user_id'] ?? 1; // Fallback to 1 if not provided for testing
+
+    switch ($action) {
+        case 'search_establishments':
+            $searchTerm = $_POST['searchTerm'] ?? '';
+            $establishments = [];
+
+            // Select all relevant fields from establishments
+            $selectFields = "ID, license_no, unique_id, facility_name, brand_name, area, activity_type, hazard_class, 
+                             LicenseIssuing, ltype, sub_no, Building, detailed_activities, facility_status, unit, Sub_UNIT, site_coordinates, Sector, Sub_Sector, lstart_date, lend_date, user, area_id";
+
+            // If the search term is purely numeric, do an exact match on license_no
+            if (ctype_digit($searchTerm)) {
+                $stmt = $conn->prepare("SELECT $selectFields FROM establishments WHERE license_no = ? LIMIT 20");
+                if (!$stmt) {
+                    $response_data = ['success' => false, 'message' => 'خطأ في إعداد استعلام البحث بالرقم: ' . $conn->error];
+                    break;
+                }
+                $stmt->bind_param("s", $searchTerm);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                while ($row = $result->fetch_assoc()) {
+                    $establishments[] = $row;
+                }
+                $stmt->close();
+            } else { // If not purely numeric, perform a LIKE search on license_no or facility_name
+                $likeSearchTerm = '%' . $searchTerm . '%';
+                $stmt = $conn->prepare("SELECT $selectFields FROM establishments WHERE license_no LIKE ? OR facility_name LIKE ? LIMIT 20");
+                if (!$stmt) {
+                    $response_data = ['success' => false, 'message' => 'خطأ في إعداد استعلام البحث بالنص: ' . $conn->error];
+                    break;
+                }
+                $stmt->bind_param("ss", $likeSearchTerm, $likeSearchTerm);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                while ($row = $result->fetch_assoc()) {
+                    $establishments[] = $row;
+                }
+                $stmt->close();
+            }
+            
+            // Add last_inspection_date, taken_actions_previous (notes from last inspection), and last_evaluation_date
+            foreach ($establishments as &$est) { // Use reference to modify array directly
+                $est['last_inspection_date'] = null;
+                $est['taken_actions_previous'] = null; // Storing notes from the last inspection for simplicity
+                $est['last_evaluation_date'] = null;
+
+                // Get last inspection date and notes for this establishment
+                $stmt_last_insp = $conn->prepare("SELECT inspection_date, notes FROM tbl_inspections WHERE facility_unique_id = ? ORDER BY inspection_date DESC, inspection_id DESC LIMIT 1");
+                if ($stmt_last_insp) {
+                    $stmt_last_insp->bind_param("s", $est['unique_id']);
+                    $stmt_last_insp->execute();
+                    $result_last_insp = $stmt_last_insp->get_result();
+                    if ($row_last_insp = $result_last_insp->fetch_assoc()) {
+                        $est['last_inspection_date'] = $row_last_insp['inspection_date'];
+                        $est['taken_actions_previous'] = $row_last_insp['notes'];
+                    }
+                    $stmt_last_insp->close();
+                } else {
+                    error_log("Error preparing last inspection query: " . $conn->error);
+                }
+
+                // Get last evaluation date for this establishment
+                // Assuming tbl_evaluation_factors exists and has assessment_date and facility_unique_id
+                $stmt_last_eval = $conn->prepare("SELECT MAX(assessment_date) AS last_eval_date FROM tbl_evaluation_factors WHERE facility_unique_id = ?");
+                if ($stmt_last_eval) {
+                    $stmt_last_eval->bind_param("s", $est['unique_id']);
+                    $stmt_last_eval->execute();
+                    $result_last_eval = $stmt_last_eval->get_result();
+                    if ($row_last_eval = $result_last_eval->fetch_assoc()) {
+                        $est['last_evaluation_date'] = $row_last_eval['last_eval_date'];
+                    }
+                    $stmt_last_eval->close();
+                } else {
+                    error_log("Error preparing last evaluation query: " . $conn->error);
+                }
+            }
+            unset($est); // Break the reference
+
+            usort($establishments, function($a, $b) {
+                return strcmp($a['license_no'], $b['license_no']);
+            });
+
+            $response_data = ['success' => true, 'data' => $establishments];
+            break;
+
+        case 'create_inspection':
+            $facilityUniqueId = $_POST['facility_unique_id'] ?? '';
+            $inspectionDate = $_POST['inspection_date'] ?? '';
+            $inspectionType = $_POST['inspection_type'] ?? '';
+            $campaignName = $_POST['campaign_name'] ?? null;
+            $inspectorUserId = $_POST['inspector_user_id'] ?? 1; // Will be passed from frontend session
+            $notes = $_POST['notes'] ?? null;
+            // violation_ref_no is initially optional, set to NULL by default if not provided
+            $violationRefNo = $_POST['violation_ref_no'] ?? null; 
+
+            if (empty($facilityUniqueId) || empty($inspectionDate) || empty($inspectionType)) {
+                $response_data = ['success' => false, 'message' => 'البيانات الأساسية للتفتيش غير مكتملة.'];
+                break;
+            }
+
+            $stmt = $conn->prepare("INSERT INTO tbl_inspections (facility_unique_id, inspection_date, inspection_type, campaign_name, inspector_user_id, notes, violation_ref_no) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            if (!$stmt) {
+                $response_data = ['success' => false, 'message' => 'خطأ في إعداد استعلام إنشاء التفتيش: ' . $conn->error];
+                break;
+            }
+            $stmt->bind_param("ssssiss", $facilityUniqueId, $inspectionDate, $inspectionType, $campaignName, $inspectorUserId, $notes, $violationRefNo);
+
+            if ($stmt->execute()) {
+                $newInspectionId = $conn->insert_id;
+                $response_data = ['success' => true, 'inspection_id' => $newInspectionId, 'message' => 'تم إنشاء التفتيش بنجاح.'];
+            } else {
+                $response_data = ['success' => false, 'message' => 'فشل إنشاء التفتيش: ' . $stmt->error];
+            }
+            $stmt->close();
+            break;
+
+        case 'get_inspection_codes':
+            $facilityUniqueId = $_POST['facility_unique_id'] ?? null;
+            $establishmentActivityType = null;
+
+            if ($facilityUniqueId) {
+                $stmt = $conn->prepare("SELECT activity_type FROM establishments WHERE unique_id = ?");
+                $stmt->bind_param("s", $facilityUniqueId);
+                $stmt->execute();
+                $result = $stmt->get_result();
+                $establishment = $result->fetch_assoc();
+                if ($establishment) {
+                    $establishmentActivityType = trim($establishment['activity_type']);
+                }
+                $stmt->close();
+            }
+
+            $codes = [];
+            
+            $query = "SELECT code_id, code_description, code_category, standard_reference, fixed_corrective_action, default_action_type 
+                      FROM tbl_inspection_code 
+                      WHERE activity_type = 'All' ";
+            
+            $params = [];
+            $types = "";
+
+            if ($establishmentActivityType) {
+                // Split activity types by comma or Arabic comma
+                $activityTypesArray = array_map('trim', explode(',', str_replace('،', ',', $establishmentActivityType)));
+                $activityTypeConditions = [];
+                foreach ($activityTypesArray as $type) {
+                    $activityTypeConditions[] = "FIND_IN_SET(?, REPLACE(activity_type, '،', ',')) > 0";
+                    $params[] = $type;
+                    $types .= "s";
+                }
+                if (!empty($activityTypeConditions)) {
+                    $query .= " OR (" . implode(' OR ', $activityTypeConditions) . ")";
+                }
+            }
+            
+            $query .= " ORDER BY code_category DESC, code_id ASC";
+            
+            $stmt = $conn->prepare($query);
+            if (!$stmt) {
+                $response_data = ['success' => false, 'message' => 'خطأ في إعداد استعلام بنود التفتيش: ' . $conn->error];
+                break;
+            }
+            
+            if (!empty($params)) {
+                call_user_func_array([$stmt, 'bind_param'], array_merge([$types], $params));
+            }
+            
+            $stmt->execute();
+            $result = $stmt->get_result();
+            while ($row = $result->fetch_assoc()) {
+                $codes[] = $row;
+            }
+            $stmt->close();
+
+            $response_data = ['success' => true, 'data' => $codes];
+            break;
+            
+        case 'check_previous_violation':
+            $facilityUniqueId = $_POST['facility_unique_id'] ?? null;
+            $codeId = $_POST['code_id'] ?? null;
+
+            if (!$facilityUniqueId || !$codeId) {
+                $response_data = ['success' => false, 'message' => 'بيانات غير كافية للتحقق من المخالفات السابقة.'];
+                break;
+            }
+
+            $repeated_count = 0;
+
+            // Get the inspection_ids of the last 3 *previous* inspections for this facility
+            $stmt_prev_inspections = $conn->prepare("
+                SELECT i.inspection_id
+                FROM tbl_inspections i
+                WHERE i.facility_unique_id = ?
+                ORDER BY i.inspection_date DESC, i.inspection_id DESC
+                LIMIT 3
+            ");
+            if ($stmt_prev_inspections) {
+                $stmt_prev_inspections->bind_param("s", $facilityUniqueId);
+                $stmt_prev_inspections->execute();
+                $result_prev_inspections = $stmt_prev_inspections->get_result();
+
+                $previous_inspection_ids = [];
+                while ($row_prev = $result_prev_inspections->fetch_assoc()) {
+                    $previous_inspection_ids[] = $row_prev['inspection_id'];
+                }
+                $stmt_prev_inspections->close();
+
+                if (!empty($previous_inspection_ids)) {
+                    $placeholders = implode(',', array_fill(0, count($previous_inspection_ids), '?'));
+                    $types = str_repeat('i', count($previous_inspection_ids));
+
+                    // Count violations of this specific code_id in those previous inspections
+                    $stmt_violation_count = $conn->prepare("
+                        SELECT COUNT(*) AS violation_count
+                        FROM tbl_inspection_items
+                        WHERE code_id = ? AND is_violation = 1 AND inspection_id IN ($placeholders)
+                    ");
+                    if ($stmt_violation_count) {
+                        $params_violation_count = array_merge([$types . 'i'], [$codeId], $previous_inspection_ids);
+                        $ref_params = [];
+                        foreach ($params_violation_count as $key => $value) {
+                            $ref_params[$key] = &$params_violation_count[$key];
+                        }
+                        call_user_func_array([$stmt_violation_count, 'bind_param'], $ref_params);
+
+                        $stmt_violation_count->execute();
+                        $result_violation_count = $stmt_violation_count->get_result();
+                        $row_violation_count = $result_violation_count->fetch_assoc();
+                        $repeated_count = $row_violation_count['violation_count'] ?? 0;
+                        $stmt_violation_count->close();
+                    } else {
+                        error_log("Failed to prepare stmt_violation_count in check_previous_violation: " . $conn->error);
+                    }
+                }
+            } else {
+                error_log("Failed to prepare stmt_prev_inspections in check_previous_violation: " . $conn->error);
+            }
+
+            $isRepeatedViolation = ($repeated_count > 0);
+            $response_data = ['success' => true, 'is_repeated_violation' => $isRepeatedViolation, 'repeated_count' => $repeated_count];
+            break;
+
+ case 'save_inspection_items':
+            $inspection_id = $_POST['inspection_id'] ?? null;
+            $inspection_items_data = json_decode($_POST['items_data'], true) ?? [];
+            // Added violation_ref_no and updated_by_user_id for potential update
+            $violationRefNo = $_POST['violation_ref_no'] ?? null; 
+            $updatedByUserId = $loggedInUserId; // From the assumed logged-in user ID at the top
+
+            if (!$inspection_id || empty($inspection_items_data)) {
+                $response_data = ['success' => false, 'message' => 'بيانات غير كافية لحفظ بنود التفتيش.'];
+                break;
+            }
+
+            $current_facility_unique_id = null;
+            $stmt_facility = $conn->prepare("SELECT facility_unique_id FROM tbl_inspections WHERE inspection_id = ?");
+            if ($stmt_facility) {
+                $stmt_facility->bind_param("i", $inspection_id);
+                $stmt_facility->execute();
+                $result_facility = $stmt_facility->get_result();
+                $row_facility = $result_facility->fetch_assoc();
+                if ($row_facility) {
+                    $current_facility_unique_id = $row_facility['facility_unique_id'];
+                }
+                $stmt_facility->close();
+            } else {
+                $response_data = ['success' => false, 'message' => 'خطأ في إعداد استعلام جلب معرف المنشأة: ' . $conn->error];
+                break;
+            }
+
+            $conn->begin_transaction();
+            $errors = [];
+            $successCount = 0;
+
+            // Delete existing items for this inspection to prevent duplicates on resubmission
+            $delete_stmt = $conn->prepare("DELETE FROM tbl_inspection_items WHERE inspection_id = ?");
+            if (!$delete_stmt) {
+                $errors[] = "خطأ في إعداد استعلام حذف البنود القديمة: " . $conn->error;
+                $conn->rollback();
+                $response_data = ['success' => false, 'message' => $errors[0]];
+                break;
+            }
+            $delete_stmt->bind_param("i", $inspection_id);
+            $delete_stmt->execute();
+            $delete_stmt->close();
+
+            foreach ($inspection_items_data as $item) {
+                $code_id = intval($item['code_id']);
+                $action_taken = $item['action_taken'] ?? null;
+                $condition_level = $item['condition_level'] ?? 'N/A';
+                $deducted_points = isset($item['deducted_points']) ? floatval($item['deducted_points']) : 0.00;
+                $immediate_correction = $item['immediate_correction'] ?? null;
+                $inspector_notes = $item['inspector_notes'] ?? null;
+                $violation_value = isset($item['violation_value']) ? floatval($item['violation_value']) : null; // Get violation_value
+
+                $is_violation = ($action_taken === 'مخالفة') ? 1 : 0;
+                $repeated_count = 0; 
+
+                // Only process items that have an action, or if it's a violation with 0 deducted points (e.g. for a warning)
+                // This condition needs to be carefully aligned with frontend logic.
+                // If action_taken is 'إجراء تصحيحي', it should save but with 0 points.
+                // If action_taken is 'انذار', it should save with its points.
+                // If is_violation is 0 (not a violation), and action_taken is also null/empty, then skip.
+                if (empty($action_taken)) {
+                    continue; 
+                }
+
+                if (!$code_id) { 
+                    $errors[] = "بيانات البند ناقصة (كود).";
+                    continue;
+                }
+
+                // Calculate repeated_count only if the current item is a violation
+                if ($is_violation === 1 && $current_facility_unique_id) {
+                    $stmt_prev_inspections = $conn->prepare("
+                        SELECT i.inspection_id
+                        FROM tbl_inspections i
+                        WHERE i.facility_unique_id = ? AND i.inspection_id != ?
+                        ORDER BY i.inspection_date DESC, i.inspection_id DESC
+                        LIMIT 3
+                    ");
+                    if ($stmt_prev_inspections) {
+                        $stmt_prev_inspections->bind_param("si", $current_facility_unique_id, $inspection_id);
+                        $stmt_prev_inspections->execute();
+                        $result_prev_inspections = $stmt_prev_inspections->get_result();
+
+                        $previous_inspection_ids = [];
+                        while ($row_prev = $result_prev_inspections->fetch_assoc()) {
+                            $previous_inspection_ids[] = $row_prev['inspection_id'];
+                        }
+                        $stmt_prev_inspections->close();
+
+                        if (!empty($previous_inspection_ids)) {
+                            $placeholders = implode(',', array_fill(0, count($previous_inspection_ids), '?'));
+                            $types = str_repeat('i', count($previous_inspection_ids));
+
+                            $stmt_violation_count = $conn->prepare("
+                                SELECT COUNT(*) AS violation_count
+                                FROM tbl_inspection_items
+                                WHERE code_id = ? AND is_violation = 1 AND inspection_id IN ($placeholders)
+                            ");
+                            if ($stmt_violation_count) {
+                                $params_violation_count = array_merge([$types . 'i'], [$code_id], $previous_inspection_ids);
+                                $ref_params = [];
+                                foreach ($params_violation_count as $key => $value) {
+                                    $ref_params[$key] = &$params_violation_count[$key];
+                                }
+                                call_user_func_array([$stmt_violation_count, 'bind_param'], $ref_params);
+
+                                $stmt_violation_count->execute();
+                                $result_violation_count = $stmt_violation_count->get_result();
+                                $row_violation_count = $result_violation_count->fetch_assoc();
+                                $repeated_count = $row_violation_count['violation_count'] ?? 0;
+                                $stmt_violation_count->close();
+                            } else {
+                                error_log("Failed to prepare stmt_violation_count: " . $conn->error);
+                            }
+                        }
+                    } else {
+                        error_log("Failed to prepare stmt_prev_inspections: " . $conn->error);
+                    }
+                }
+case 'save_inspection_items':
+    $inspection_id = $_POST['inspection_id'] ?? null;
+    $inspection_items_data = json_decode($_POST['items_data'], true) ?? [];
+    // Added violation_ref_no and updated_by_user_id for potential update
+    $violationRefNo = $_POST['violation_ref_no'] ?? null; 
+    $updatedByUserId = $loggedInUserId; // From the assumed logged-in user ID at the top
+
+    if (!$inspection_id || empty($inspection_items_data)) {
+        $response_data = ['success' => false, 'message' => 'بيانات غير كافية لحفظ بنود التفتيش.'];
+        break;
+    }
+
+    $current_facility_unique_id = null;
+    $stmt_facility = $conn->prepare("SELECT facility_unique_id FROM tbl_inspections WHERE inspection_id = ?");
+    if ($stmt_facility) {
+        $stmt_facility->bind_param("i", $inspection_id);
+        $stmt_facility->execute();
+        $result_facility = $stmt_facility->get_result();
+        $row_facility = $result_facility->fetch_assoc();
+        if ($row_facility) {
+            $current_facility_unique_id = $row_facility['facility_unique_id'];
+        }
+        $stmt_facility->close();
+    } else {
+        $response_data = ['success' => false, 'message' => 'خطأ في إعداد استعلام جلب معرف المنشأة: ' . $conn->error];
+        break;
+    }
+
+    $conn->begin_transaction();
+    $errors = [];
+    $successCount = 0;
+
+    // Delete existing items for this inspection to prevent duplicates on resubmission
+    $delete_stmt = $conn->prepare("DELETE FROM tbl_inspection_items WHERE inspection_id = ?");
+    if (!$delete_stmt) {
+        $errors[] = "خطأ في إعداد استعلام حذف البنود القديمة: " . $conn->error;
+        $conn->rollback();
+        $response_data = ['success' => false, 'message' => $errors[0]];
+        break;
+    }
+    $delete_stmt->bind_param("i", $inspection_id);
+    $delete_stmt->execute();
+    $delete_stmt->close();
+
+    foreach ($inspection_items_data as $item) {
+        $code_id = intval($item['code_id']);
+        $action_taken = $item['action_taken'] ?? null;
+        $condition_level = $item['condition_level'] ?? 'N/A';
+        $deducted_points = isset($item['deducted_points']) ? floatval($item['deducted_points']) : 0.00;
+        $immediate_correction = $item['immediate_correction'] ?? null;
+        $inspector_notes = $item['inspector_notes'] ?? null;
+        $violation_value = isset($item['violation_value']) ? floatval($item['violation_value']) : null; // Get violation_value
+
+        $is_violation = ($action_taken === 'مخالفة') ? 1 : 0;
+        $repeated_count = 0; 
+
+        // Only process items that have an action, or if it's a violation with 0 deducted points (e.g. for a warning)
+        if (empty($action_taken)) {
+            continue; 
+        }
+
+        if (!$code_id) { 
+            $errors[] = "بيانات البند ناقصة (كود).";
+            continue;
+        }
+
+        // Calculate repeated_count only if the current item is a violation
+        if ($is_violation === 1 && $current_facility_unique_id) {
+            $stmt_prev_inspections = $conn->prepare("
+                SELECT i.inspection_id
+                FROM tbl_inspections i
+                WHERE i.facility_unique_id = ? AND i.inspection_id != ?
+                ORDER BY i.inspection_date DESC, i.inspection_id DESC
+                LIMIT 3
+            ");
+            if ($stmt_prev_inspections) {
+                $stmt_prev_inspections->bind_param("si", $current_facility_unique_id, $inspection_id);
+                $stmt_prev_inspections->execute();
+                $result_prev_inspections = $stmt_prev_inspections->get_result();
+
+                $previous_inspection_ids = [];
+                while ($row_prev = $result_prev_inspections->fetch_assoc()) {
+                    $previous_inspection_ids[] = $row_prev['inspection_id'];
+                }
+                $stmt_prev_inspections->close();
+
+                if (!empty($previous_inspection_ids)) {
+                    $placeholders = implode(',', array_fill(0, count($previous_inspection_ids), '?'));
+                    $types = str_repeat('i', count($previous_inspection_ids));
+
+                    $stmt_violation_count = $conn->prepare("
+                        SELECT COUNT(*) AS violation_count
+                        FROM tbl_inspection_items
+                        WHERE code_id = ? AND is_violation = 1 AND inspection_id IN ($placeholders)
+                    ");
+                    if ($stmt_violation_count) {
+                        $params_violation_count = array_merge([$types . 'i'], [$code_id], $previous_inspection_ids);
+                        $ref_params = [];
+                        foreach ($params_violation_count as $key => $value) {
+                            $ref_params[$key] = &$params_violation_count[$key];
+                        }
+                        call_user_func_array([$stmt_violation_count, 'bind_param'], $ref_params);
+
+                        $stmt_violation_count->execute();
+                        $result_violation_count = $stmt_violation_count->get_result();
+                        $row_violation_count = $result_violation_count->fetch_assoc();
+                        $repeated_count = $row_violation_count['violation_count'] ?? 0;
+                        $stmt_violation_count->close();
+                    } else {
+                        error_log("Failed to prepare stmt_violation_count: " . $conn->error);
+                    }
+                }
+            } else {
+                error_log("Failed to prepare stmt_prev_inspections: " . $conn->error);
+            }
+        }
+
+        $stmt = $conn->prepare("
+            INSERT INTO tbl_inspection_items
+                (inspection_id, code_id, is_violation, action_taken, condition_level, 
+                 deducted_points, immediate_correction, inspector_notes, repeated_count, violation_value)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ");
+        $stmt->bind_param(
+            "iiissdssid",
+            $inspection_id,
+            $code_id,
+            $is_violation,
+            $action_taken,
+            $condition_level,
+            $deducted_points,
+            $immediate_correction,
+            $inspector_notes,
+            $repeated_count,
+            $violation_value
+        );
+
+        if ($stmt->execute()) {
+            $successCount++;
+        } else {
+            $errors[] = "فشل حفظ البند رقم $code_id: " . $stmt->error;
+        }
+        $stmt->close();
+    }
+
+    if (empty($errors)) {
+        // Update violation_ref_no in tbl_inspections if provided
+        if ($violationRefNo !== null && $inspection_id !== null) {
+            $stmt_update_insp = $conn->prepare("UPDATE tbl_inspections SET violation_ref_no = ?, updated_by_user_id = ? WHERE inspection_id = ?");
+            if ($stmt_update_insp) {
+                $stmt_update_insp->bind_param("sii", $violationRefNo, $updatedByUserId, $inspection_id);
+                $stmt_update_insp->execute();
+                $stmt_update_insp->close();
+            } else {
+                error_log("Error preparing update violation_ref_no statement: " . $conn->error);
+            }
+        } else {
+             // If no violationRefNo but there's an update, just update updated_by_user_id
+             $stmt_update_insp = $conn->prepare("UPDATE tbl_inspections SET updated_by_user_id = ? WHERE inspection_id = ?");
+             if ($stmt_update_insp) {
+                 $stmt_update_insp->bind_param("ii", $updatedByUserId, $inspection_id);
+                 $stmt_update_insp->execute();
+                 $stmt_update_insp->close();
+             } else {
+                 error_log("Error preparing update updated_by_user_id statement: " . $conn->error);
+             }
+        }
+
+        $conn->commit();
+        $results = calculateInspectionResults($inspection_id, $conn, $updatedByUserId); // Pass updated_by_user_id
+        $response_data = ['success' => true, 'saved' => $successCount, 'results' => $results, 'message' => 'تم حفظ بنود التفتيش وحساب النتائج بنجاح.'];
+    } else {
+        $conn->rollback();
+        $response_data = ['success' => false, 'saved' => $successCount, 'errors' => $errors, 'message' => 'حدثت أخطاء أثناء حفظ بنود التفتيش.'];
+    }
+    break;
+
+
+        default:
+            $response_data = ['success' => false, 'message' => 'إجراء غير صالح.'];
+            break;
+    }
+} else {
+    $response_data = ['success' => false, 'message' => 'طريقة طلب غير صالحة.'];
+}
+
+$output_buffer_content = ob_get_clean();
+
+if (!empty($output_buffer_content)) {
+    $response_data['debug_output'] = $output_buffer_content;
+    $response_data['message'] = 'An internal server error occurred. Debug info in debug_output.';
+}
+
+echo json_encode($response_data);
+?>
