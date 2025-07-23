@@ -1,805 +1,2144 @@
 <?php
-// تفعيل التخزين المؤقت للإخراج لالتقاط أي إخراج مبكر أو أخطاء
-ob_start();
-
-// عرض الأخطاء البرمجية للمساعدة في التصحيح (يفضل إزالتها في الإنتاج)
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
-
-// رؤوس CORS (Cross-Origin Resource Sharing) للسماح بطلبات من نطاقات مختلفة
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
-
-// تضمين ملف اتصال قاعدة البيانات
-require_once 'db.php';
-
-// Function to calculate inspection results
-function calculateInspectionResults($inspectionId, $conn, $updatedByUserId = null) {
-    // 1. Get total deducted points and total violation value for this inspection
-    $stmt = $conn->prepare("SELECT SUM(deducted_points) AS total_deducted_points, SUM(violation_value) AS total_violation_value FROM tbl_inspection_items WHERE inspection_id = ?");
-    $stmt->bind_param("i", $inspectionId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $row = $result->fetch_assoc();
-    $totalDeductedPoints = $row['total_deducted_points'] ?? 0.00;
-    $totalViolationValue = $row['total_violation_value'] ?? 0.00; // Added total_violation_value
-    $stmt->close();
-
-    // 2. Get the establishment's hazard class, Sub_Sector, and the inspection_date
-    $hazardClass = null;
-    $establishmentSubSector = null; // New field for Sub_Sector
-    $currentInspectionDate = null;
-    $stmt = $conn->prepare("SELECT e.hazard_class, e.Sub_Sector, i.inspection_date FROM tbl_inspections i JOIN establishments e ON i.facility_unique_id = e.unique_id WHERE i.inspection_id = ?");
-    $stmt->bind_param("i", $inspectionId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $row = $result->fetch_assoc();
-    if ($row) {
-        $hazardClass = $row['hazard_class'];
-        $establishmentSubSector = $row['Sub_Sector'];
-        $currentInspectionDate = $row['inspection_date'];
-    }
-    $stmt->close();
-
-    // Get WorkMod from Sectors table based on Sub_Sector
-    $workMod = null;
-    if ($establishmentSubSector) {
-        $stmt = $conn->prepare("SELECT WorkMod FROM Sectors WHERE SectorID = ?");
-        $stmt->bind_param("i", $establishmentSubSector);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $sectorRow = $result->fetch_assoc();
-        if ($sectorRow) {
-            $workMod = $sectorRow['WorkMod'];
-        }
-        $stmt->close();
-    }
-
-    $baseScore = 1000.00;
-
-    $finalInspectionScore = max(0, $baseScore - $totalDeductedPoints);
-    $percentageScore = ($baseScore > 0) ? ($finalInspectionScore / $baseScore) * 100 : 0;
-
-    $letterGrade = '';
-    $colorCard = '';
-
-    if ($percentageScore >= 95) {
-        $letterGrade = 'A+';
-        $colorCard = 'أخضر داكن';
-    } elseif ($percentageScore >= 90) {
-        $letterGrade = 'A';
-        $colorCard = 'أخضر';
-    } elseif ($percentageScore >= 75) {
-        $letterGrade = 'B';
-        $colorCard = 'أخضر فاتح';
-    } elseif ($percentageScore >= 60) {
-        $letterGrade = 'C';
-        $colorCard = 'أصفر';
-    } elseif ($percentageScore >= 45) {
-        $letterGrade = 'D';
-        $colorCard = 'برتقالي';
-    } else {
-        $letterGrade = 'E';
-        $colorCard = 'أحمر';
-    }
-
-    // Calculate Next Inspection Date based on hazard_class, letter_grade, and WorkMod
-    $nextInspectionDate = null;
-    $baseDate = null;
-
-    if ($currentInspectionDate) {
-        $baseDate = new DateTime($currentInspectionDate);
-    } else {
-        $baseDate = new DateTime();
-    }
-
-    $frequencyDays = null;
-    // Step 1: Get recommended frequency days from your "Inspection Frequency" rules table
-    // Assuming a table named 'tbl_inspection_frequency_rules' with columns: hazard_class, letter_grade, frequency_days
-    $stmt_freq = $conn->prepare("SELECT frequency_days FROM tbl_inspection_frequency_rules WHERE hazard_class = ? AND letter_grade = ?");
-    if ($stmt_freq) {
-        $stmt_freq->bind_param("ss", $hazardClass, $letterGrade);
-        $stmt_freq->execute();
-        $result_freq = $stmt_freq->get_result();
-        $row_freq = $result_freq->fetch_assoc();
-        if ($row_freq) {
-            $frequencyDays = $row_freq['frequency_days'];
-        }
-        $stmt_freq->close();
-    }
-
-    // Default frequencies if not found in table or for specific cases
-    if ($colorCard === 'أحمر') {
-        $frequencyDays = 20; // Specific for 'أحمر' card
-    } elseif (is_null($frequencyDays)) {
-        // Fallback to hazard_class logic if no specific rule found for letter grade
-        switch ($hazardClass) {
-            case 'Very-high': $frequencyDays = 30; break; // 1 month
-            case 'High':      $frequencyDays = 90; break; // 3 months
-            case 'Medium':    $frequencyDays = 180; break; // 6 months
-            case 'Low':       $frequencyDays = 365; break; // 12 months
-            case 'Very-Low':  $frequencyDays = 730; break; // 24 months
-            default:          $frequencyDays = 90; // Default for undefined hazard class
-        }
-    }
-    
-    // Step 2: Calculate actual next inspection date respecting WorkMod
-    if ($frequencyDays !== null) {
-        $daysAdded = 0;
-        $workDaysPerCycle = 0;
-        $restDaysPerCycle = 0;
-
-        if ($workMod) {
-            list($workDaysPerCycle, $restDaysPerCycle) = array_map('intval', explode(',', $workMod));
-        }
-
-        // Loop to add days, skipping rest days based on WorkMod
-        while ($daysAdded < $frequencyDays) {
-            $baseDate->modify('+1 day');
-            $dayOfWeek = (int)$baseDate->format('N'); // 1 (Monday) to 7 (Sunday)
-
-            // Assume standard UAE weekend: Friday (5) and Saturday (6) if WorkMod is 5,2
-            // Or if WorkMod is 7,0, no rest days are skipped in this logic.
-            // If WorkMod defines specific rest days of the week, this logic needs adjustment.
-            // For simplicity, let's assume WorkMod '5,2' implies standard Fri-Sat weekend.
-            // If it's a rolling cycle, this logic needs to be much more complex.
-            
-            $isRestDay = false;
-            if ($workMod === '7,0') { // 7 working days, 0 rest days
-                $isRestDay = false;
-            } elseif ($workMod === '5,2') { // 5 working days, 2 rest days (typical work week)
-                if ($dayOfWeek == 5 || $dayOfWeek == 6) { // Friday or Saturday (adjust based on your region's actual weekend)
-                    $isRestDay = true;
-                }
-            }
-            // Add more conditions for other WorkMod values if they define different fixed rest days.
-            // For '4,2', it would skip the 5th and 6th day in a 6-day cycle. This is more complex to implement without more specific rules.
-            // For now, only 7,0 and 5,2 are handled robustly based on common interpretation.
-            
-            if (!$isRestDay) {
-                $daysAdded++;
-            }
-        }
-        $nextInspectionDate = $baseDate->format('Y-m-d');
-    } else {
-        $nextInspectionDate = null; // No frequency defined
-    }
-
-    // Update inspection record with results
-    $updateStmtQuery = "UPDATE tbl_inspections SET total_deducted_points = ?, final_inspection_score = ?, percentage_score = ?, letter_grade = ?, color_card = ?, next_inspection_date = ?, total_violation_value = ?";
-    $updateTypes = "ddssssd";
-    $updateParams = [&$totalDeductedPoints, &$finalInspectionScore, &$percentageScore, &$letterGrade, &$colorCard, &$nextInspectionDate, &$totalViolationValue];
-
-    if ($updatedByUserId !== null) {
-        $updateStmtQuery .= ", updated_by_user_id = ?";
-        $updateTypes .= "i";
-        $updateParams[] = &$updatedByUserId;
-    }
-
-    $updateStmtQuery .= " WHERE inspection_id = ?";
-    $updateTypes .= "i";
-    $updateParams[] = &$inspectionId;
-
-    $stmt = $conn->prepare($updateStmtQuery);
-    if (!$stmt) {
-        error_log("Error preparing update inspection results statement: " . $conn->error);
-        return false;
-    }
-    
-    // Bind parameters dynamically
-    call_user_func_array([$stmt, 'bind_param'], array_merge([$updateTypes], $updateParams));
-
-    $stmt->execute();
-    $stmt->close();
-
-    // Get violation counts by category
-    $stmt = $conn->prepare("
-        SELECT tic.code_category, COUNT(tii.code_id) AS violation_count
-        FROM tbl_inspection_items tii
-        JOIN tbl_inspection_code tic ON tii.code_id = tic.code_id
-        WHERE tii.inspection_id = ? AND tii.is_violation = 1
-        GROUP BY tic.code_category
-    ");
-    $stmt->bind_param("i", $inspectionId);
-    $stmt->execute();
-    $categoryCounts = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-    $stmt->close();
-
-    $criticalViolations = 0;
-    $majorViolations = 0;
-    $generalViolations = 0;
-
-    foreach ($categoryCounts as $cat) {
-        if ($cat['code_category'] === 'Critical') { // Assuming 'Critical' maps to 'كوارث صحية' or similar
-            $criticalViolations = $cat['violation_count'];
-        } elseif ($cat['code_category'] === 'Major') { // Assuming 'Major' maps to 'مخالفة رئيسية'
-            $majorViolations = $cat['violation_count'];
-        } elseif ($cat['code_category'] === 'General') { // Assuming 'General' maps to 'مخالفة عامة'
-            $generalViolations = $cat['violation_count'];
-        }
-    }
-
-    return [
-        'total_deducted_points' => $totalDeductedPoints,
-        'final_inspection_score' => $finalInspectionScore,
-        'percentage_score' => $percentageScore,
-        'letter_grade' => $letterGrade,
-        'color_card' => $colorCard,
-        'next_inspection_date' => $nextInspectionDate,
-        'critical_violations' => $criticalViolations,
-        'major_violations' => $majorViolations,
-        'general_violations' => $generalViolations,
-        'total_violation_value' => $totalViolationValue // Return total violation value
-    ];
+session_start();
+require_once 'auth.php';
+if (!isset($_SESSION['user']) || !is_array($_SESSION['user']) || empty($_SESSION['user']['EmpName'])) {
+    header("Location: login.php");
+    exit;
 }
+$user = $_SESSION['user'];
+$loggedInUserId = $user['EmpID'] ?? '';
+$loggedInUserName = $user['EmpName'] ?? '';
+?>
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نموذج التفتيش الموحد</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+<style>
+    :root {
+        --primary-color: #28a745;
+        --secondary-bg: #e8f5e9;
+        --card-bg: #ffffff;
+        --text-color: #333;
+        --border-color: #ddd;
+        --focus-color: #1a7a3b;
+        --shadow-light: rgba(0, 0, 0, 0.08);
+        --danger-color: #dc3545;
+    }
+    body {
+        font-family: 'Cairo', sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: var(--secondary-bg);
+        color: var(--text-color);
+        direction: rtl;
+    }
+    .container {
+        max-width: 900px;
+        margin: 20px auto;
+        padding: 20px;
+        background-color: var(--card-bg);
+        border-radius: 8px;
+        box-shadow: 0 4px 10px var(--shadow-light);
+    }
+    .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-bottom: 15px;
+        margin-bottom: 20px;
+        border-bottom: 2px solid var(--primary-color);
+    }
+    .header img {
+        height: 60px;
+    }
+    .header-text {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        color: #1a7a3b;
+        font-weight: bold;
+    }
+    .header-text .main-title {
+        font-size: 1.2em;
+        margin-bottom: 2px;
+    }
+    .header-text .sub-title {
+        font-size: 0.9em;
+        color: #4CAF50;
+    }
+    h1 {
+        text-align: center;
+        color: var(--primary-color);
+        margin-bottom: 30px;
+        font-size: 2em;
+    }
+    .form-section {
+        background-color: var(--card-bg);
+        padding: 20px;
+        margin-bottom: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px var(--shadow-light);
+        border: 1px solid var(--border-color);
+    }
+    .form-section h3 {
+        color: var(--primary-color);
+        border-bottom: 1px solid var(--border-color);
+        padding-bottom: 10px;
+        margin-bottom: 15px;
+        font-size: 1.3em;
+    }
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+    }
+    .form-group {
+        margin-bottom: 15px;
+    }
+    label {
+        margin-bottom: 5px;
+        display: block;
+        font-weight: bold;
+        color: #555;
+    }
+    input, select, textarea {
+        width: 100%;
+        padding: 10px;
+        margin-bottom: 5px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        box-sizing: border-box;
+        font-family: 'Cairo', sans-serif;
+    }
+    input[type="date"] {
+        direction: rtl;
+    }
+    input:focus, select:focus, textarea:focus {
+        border-color: var(--focus-color);
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.2);
+    }
+    .readonly {
+        background-color: #f5f5f5;
+        cursor: not-allowed;
+    }
+    #message {
+        margin-bottom: 20px;
+        padding: 10px;
+        border-radius: 5px;
+        text-align: center;
+        display: none;
+    }
+    .success {
+        background-color: #e8f5e9;
+        border: 1px solid var(--primary-color);
+        color: var(--focus-color);
+    }
+    .error {
+        background-color: #ffe6e6;
+        border: 1px solid var(--danger-color);
+        color: #c82333;
+    }
+    .search-area {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+    }
+    .search-area input {
+        flex-grow: 1;
+    }
+    button {
+        padding: 10px 20px;
+        background-color: var(--primary-color);
+        color: white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 1em;
+        display: flex;
+        align-items: center;
+        transition: all 0.2s;
+    }
+    button:hover {
+        background-color: var(--focus-color);
+        transform: translateY(-2px);
+    }
+    button i {
+        margin-left: 8px;
+    }
+    .search-btn {
+        background-color: #ffc107;
+        color: #333;
+    }
+    .search-btn:hover {
+        background-color: #e0a800;
+    }
+    .btn-secondary {
+        background-color: #6c757d;
+        color: white;
+    }
+    .btn-secondary:hover {
+        background-color: #5a6268;
+    }
+    .btn-danger {
+        background-color: var(--danger-color);
+        color: white;
+    }
+    .btn-danger:hover {
+        background-color: #c82333;
+    }
+    .item-row {
+        border: 1px solid #eee;
+        padding: 15px;
+        margin-bottom: 15px;
+        border-radius: 5px;
+        background-color: #f9f9f9;
+    }
+    .item-row p {
+        margin: 0 0 10px 0;
+    }
+    .violation-details {
+        margin-top: 15px;
+        padding-top: 15px;
+        border-top: 1px dashed #ccc;
+    }
+    .results-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 15px;
+        margin: 20px 0;
+    }
+    .result-item {
+        padding: 10px;
+        background-color: #f8f9fa;
+        border-radius: 5px;
+    }
+    .result-item strong {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--primary-color);
+    }
+    .previous-violation-indicator {
+        background-color: #ffe0b2;
+        color: #e65100;
+        padding: 5px 10px;
+        border-radius: 5px;
+        font-size: 0.8em;
+        font-weight: bold;
+        margin-right: 10px;
+        display: inline-block;
+        float: left;
+    }
+    .item-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+    .item-header p {
+        margin: 0;
+        flex-grow: 1;
+    }
+    .violation-toggle-group {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        white-space: nowrap;
+    }
+    .button-group {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 20px;
+        justify-content: flex-end;
+    }
+    .button-group button {
+        margin-top: 0;
+        flex-grow: 1;
+        text-align: center;
+    }
+    .high-violation {
+        background-color: #ffdddd;
+        border-left: 3px solid var(--danger-color);
+    }
+    #registerEstablishmentBtn {
+        display: block;
+        width: 100%;
+        text-align: center;
+        margin-top: 20px;
+        padding: 15px;
+        font-size: 1.1em;
+    }
+    .hidden {
+        display: none;
+    }
+    .switch {
+        position: relative;
+        display: inline-block;
+        width: 45px;
+        height: 25px;
+    }
+    .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+    .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #ccc;
+        -webkit-transition: .4s;
+        transition: .4s;
+        border-radius: 25px;
+    }
+    .slider:before {
+        position: absolute;
+        content: "";
+        height: 19px;
+        width: 19px;
+        left: 3px;
+        bottom: 3px;
+        background-color: white;
+        -webkit-transition: .4s;
+        transition: .4s;
+        border-radius: 50%;
+    }
+    input:checked + .slider {
+        background-color: var(--primary-color);
+    }
+    input:focus + .slider {
+        box-shadow: 0 0 1px var(--primary-color);
+    }
+    input:checked + .slider:before {
+        -webkit-transform: translateX(20px);
+        -ms-transform: translateX(20px);
+        transform: translateX(20px);
+    }
+    .checkbox-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 5px;
+    }
+    .checkbox-group label {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-weight: normal;
+        cursor: pointer;
+    }
+    .checkbox-group input[type="checkbox"] {
+        width: auto;
+        margin-bottom: 0;
+    }
+    .item-details-expanded {
+        background-color: #f0fdf4;
+        border-left: 3px solid var(--primary-color);
+        padding: 10px;
+        margin-top: 10px;
+        border-radius: 4px;
+        font-size: 0.9em;
+    }
+    .item-details-expanded p {
+        margin: 5px 0;
+    }
+    .photo-preview-container {
+        margin-top: 10px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .photo-preview-container img {
+        max-width: 100px;
+        max-height: 100px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        object-fit: cover;
+    }
+    .photo-actions {
+        display: flex;
+        gap: 5px;
+        margin-top: 5px;
+    }
+    .photo-actions button {
+        padding: 5px 10px;
+        font-size: 0.8em;
+    }
+    .editable-field {
+        background-color: #fff !important;
+        cursor: text !important;
+    }
+    .action-details {
+        margin-top: 10px;
+        padding: 10px;
+        background-color: #f8f9fa;
+        border-radius: 4px;
+        border-left: 3px solid #6c757d;
+    }
+    #message, .container, .form-section, .search-area {
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+    }
+    .actions-section {
+        margin-top: 20px;
+        border-top: 1px solid #ddd;
+        padding-top: 20px;
+    }
+    .actions-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+    }
+    .actions-table th, .actions-table td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: right;
+    }
+    .actions-table th {
+        background-color: #f2f2f2;
+    }
+    .actions-table tr:nth-child(even) {
+        background-color: #f9f9f9;
+    }
+</style>
+</head>
+<body>
+<div class="container" style="direction: rtl;">
+    <div class="header" style="display: flex; align-items: center; justify-content: space-between;">
+        <div class="header-text" style="text-align: right;">
+            <div class="main-title" style="font-weight: bold; font-size: 18px;">إدارة الرقابة والسلامة الصحية</div>
+            <div class="sub-title" style="font-size: 16px;">قسم الرقابة الغذائية</div>
+        </div>
+        <div class="logo">
+            <img src="shjmunlogo.png" alt="شعار البلدية" style="height: 60px;">
+        </div>
+    </div>
+    <h1>التفتيش المبني علي الخطورة</h1>
+    <div id="message"></div>
+    <div class="search-license-box">
+        <label for="fullLicenseSearch">بحث السجلات السابقة برقم الرخصة</label>
+        <input type="text" id="fullLicenseSearch" placeholder="أدخل رقم الرخصة الكامل" />
+        <div class="button-group" style="margin-top: 5px;">
+            <button type="button" class="btn-primary" id="searchFullLicenseBtn">
+                <i class="fas fa-search"></i> بحث
+            </button>
+            <button type="button" class="btn-secondary" id="previousFacilityBtn">
+                <i class="fas fa-arrow-right"></i> السابق
+            </button>
+            <button type="button" class="btn-secondary" id="nextFacilityBtn">
+                <i class="fas fa-arrow-left"></i> التالي
+            </button>
+        </div>
+    </div>
+    <div class="form-section" id="searchSection">
+        <h3>1. إدخال رقم الرخصة للتسجيل</h3>
+        <div class="search-area">
+            <input type="text" id="licenseNo" placeholder="أدخل رقم الرخصة أو المعرف الفريد أو اسم المنشأة">
+            <button id="searchBtn" class="search-btn"><i class="fas fa-search"></i> بحث</button>
+        </div>
+        <button type="button" class="btn-primary hidden" id="registerEstablishmentBtn">
+            <i class="fas fa-plus"></i> تسجيل منشأة جديدة
+        </button>
+        <div id="facilitySelection" class="form-group hidden">
+            <label for="facilitySelector">اختر المنشأة:</label>
+            <select id="facilitySelector">
+                <option value="">-- اختر منشأة --</option>
+            </select>
+        </div>
+        <div id="facilityInfo">
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>اسم المنشأة</label>
+                    <input type="text" id="facilityName" readonly class="readonly">
+                </div>
+                <div class="form-group">
+                    <label>رقم الرخصة</label>
+                    <input type="text" id="licenseNumberDisplay" readonly class="readonly">
+                </div>
+                <div class="form-group">
+                    <label>المعرف الفريد</label>
+                    <input type="text" id="uniqueId" readonly class="readonly">
+                </div>
+                <div class="form-group">
+                    <label>المنطقة</label>
+                    <input type="text" id="area" readonly class="readonly">
+                </div>
+                <div class="form-group">
+                    <label>نوع النشاط</label>
+                    <input type="text" id="activityType" readonly class="readonly">
+                </div>
+                <div class="form-group">
+                    <label>الوحدة</label>
+                    <input type="text" id="unit" readonly class="readonly">
+                </div>
+                <div class="form-group">
+                    <label>SHFHSP</label>
+                    <input type="text" id="shfhsp" readonly class="readonly">
+                </div>
+                <div class="form-group">
+                    <label>فئة الخطر</label>
+                    <input type="text" id="hazardClass" readonly class="readonly">
+                </div>
+                <div class="form-group">
+                    <label>القطاع الفرعي</label>
+                    <input type="text" id="sub_Sector" readonly class="readonly">
+                </div>
+                <div class="form-group">
+                    <label>تاريخ آخر تفتيش</label>
+                    <input type="date" id="lastInspectionDate" readonly class="readonly">
+                </div>
+                <div class="form-group">
+                    <label>تاريخ آخر تقييم للمنشأة</label>
+                    <input type="date" id="lastEvaluationDate" readonly class="readonly">
+                </div>
+                <div class="form-group">
+                    <label>البريد الإلكتروني</label>
+                    <input type="text" id="establishmentEmail" readonly class="readonly">
+                </div>
+            </div>
+            <div id="establishmentActionButtons" class="button-group hidden">
+                <button type="button" class="btn-secondary" id="editEstablishmentBtn">
+                    <i class="fas fa-edit"></i> تعديل المنشأة
+                </button>
+                <button type="button" class="btn-primary" id="evaluateEstablishmentBtn">
+                    <i class="fas fa-star"></i> تقييم المنشأة
+                </button>
+            </div>
+        </div>
+    </div>
+    <div class="form-section hidden" id="inspectionSection">
+        <h3>2. تفاصيل التفتيش</h3>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>تاريخ التفتيش</label>
+                <input type="date" id="inspectionDate" value="<?php echo date('Y-m-d'); ?>">
+            </div>
+            <div class="form-group">
+                <label>نوع التفتيش</label>
+                <select id="inspectionType">
+                    <option value="">-- اختر نوع التفتيش --</option>
+                    <option value="دوري">دوري</option>
+                    <option value="شكوى">شكوى</option>
+                    <option value="حملة">حملة</option>
+                    <option value="ترخيص">ترخيص</option>
+                    <option value="عينات">عينات</option>
+                    <option value="متابعة">إتباع</option>
+                </select>
+            </div>
+            <div class="form-group hidden" id="campaignGroup">
+                <label>اسم الحملة</label>
+                <input type="text" id="campaignName">
+            </div>
+            <div class="form-group">
+                <label>معرف المفتش</label>
+                <input type="number" id="inspectorId" value="<?php echo htmlspecialchars($loggedInUserId); ?>" readonly class="readonly">
+            </div>
+        </div>
+        <div class="form-group">
+            <label>ملاحظات عامة</label>
+            <textarea id="notes"></textarea>
+        </div>
+        <button id="createInspectionBtn"><i class="fas fa-plus-circle"></i> إنشاء التفتيش</button>
+    </div>
+    <div class="form-section hidden" id="itemsSection">
+        <h3>3. بنود التفتيش</h3>
+        <div id="itemsContainer"></div>
+        <div class="button-group">
+            <button id="saveItemsBtn"><i class="fas fa-save"></i> حفظ البنود</button>
+            <button type="button" class="btn-secondary" id="newInspectionBtn">
+                <i class="fas fa-plus"></i> تفتيش جديد
+            </button>
+            <button type="button" class="btn-danger" id="deleteInspectionBtn">
+                <i class="fas fa-trash"></i> حذف النموذج
+            </button>
+        </div>
+    </div>
+    <div class="form-section hidden" id="resultsSection">
+        <h3>4. نتائج التفتيش</h3>
+        <div class="results-grid">
+            <div class="result-item">
+                <strong>رقم التفتيش</strong>
+                <span id="resultInspectionId">-</span>
+            </div>
+            <div class="result-item">
+                <strong>تاريخ التفتيش</strong>
+                <span id="resultDate">-</span>
+            </div>
+            <div class="result-item">
+                <strong>نوع التفتيش</strong>
+                <span id="resultType">-</span>
+            </div>
+            <div class="result-item">
+                <strong>النقاط المخصومة</strong>
+                <span id="resultDeducted">0.00</span>
+            </div>
+            <div class="result-item">
+                <strong>الدرجة النهائية</strong>
+                <span id="resultScore">1000.00</span>
+            </div>
+            <div class="result-item">
+                <strong>النسبة المئوية</strong>
+                <span id="resultPercentage">100%</span>
+            </div>
+            <div class="result-item">
+                <strong>التقدير</strong>
+                <span id="resultGrade">-</span>
+            </div>
+            <div class="result-item">
+                <strong>لون البطاقة</strong>
+                <span id="resultCard">-</span>
+            </div>
+            <div class="result-item">
+                <strong>المخالفات الحرجة</strong>
+                <span id="resultCritical">0</span>
+            </div>
+            <div class="result-item">
+                <strong>المخالفات الهامة</strong>
+                <span id="resultMajor">0</span>
+            </div>
+            <div class="result-item">
+                <strong>المخالفات العامة</strong>
+                <span id="resultGeneral">0</span>
+            </div>
+            <div class="result-item">
+                <strong>المخالفات الإدارية</strong>
+                <span id="resultAdministrative">0</span>
+            </div>
+            <div class="result-item">
+                <strong>موعد التفتيش القادم</strong>
+                <span id="resultNextDate">-</span>
+            </div>
+            <div class="result-item">
+                <strong>رقم المخالفة</strong>
+                <input type="text" id="violationRefNo" class="editable-field" placeholder="أدخل رقم المخالفة">
+            </div>
+            <div class="result-item">
+                <strong>إجمالي قيمة المخالفة</strong>
+                <input type="number" id="totalViolationValue" class="readonly" readonly step="0.01">
+            </div>
+            <div class="result-item">
+                <strong>حالة الاعتماد</strong>
+                <input type="text" id="approvalStatus" class="readonly" value="Pending" readonly>
+            </div>
+            <div class="result-item">
+                <strong>تم الاعتماد بواسطة</strong>
+                <input type="text" id="approvedBy" class="readonly" readonly>
+            </div>
+            <div class="result-item">
+                <strong>تاريخ الاعتماد</strong>
+                <input type="date" id="approvalDate" class="readonly" readonly>
+            </div>
+            <div class="result-item">
+                <strong>آخر تحديث بواسطة</strong>
+                <input type="text" id="updatedBy" class="readonly" readonly>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>ملاحظات التفتيش</label>
+            <textarea id="resultNotes" readonly class="readonly"></textarea>
+        </div>
+        <div class="actions-section">
+            <h4>الإجراءات المتخذة</h4>
+            <div id="actionsContainer">
+                <table class="actions-table">
+                    <thead>
+                        <tr>
+                            <th>نوع الإجراء</th>
+                            <th>رقم الإجراء</th>
+                            <th>المدة (يوم)</th>
+                            <th>الحالة</th>
+                            <th>تاريخ الإنشاء</th>
+                            <th>خيارات</th>
+                        </tr>
+                    </thead>
+                    <tbody id="actionsList">
+                    </tbody>
+                </table>
+            </div>
+            <div class="form-group" style="margin-top: 20px;">
+                <button type="button" class="btn-primary" id="addActionBtn">
+                    <i class="fas fa-plus"></i> إضافة إجراء
+                </button>
+            </div>
+        </div>
+        <div class="button-group">
+            <button type="button" class="btn-primary" id="approveInspectionBtn">
+                <i class="fas fa-check-circle"></i> اعتماد التفتيش
+            </button>
+            <button type="button" class="btn-secondary" id="editInspectionBtn">
+                <i class="fas fa-edit"></i> تعديل التفتيش
+            </button>
+            <button type="button" class="btn-secondary" id="newInspectionBtnResults">
+                <i class="fas fa-plus"></i> تفتيش جديد
+            </button>
+            <button type="button" class="btn-danger" id="deleteInspectionBtnResults">
+                <i class="fas fa-trash"></i> حذف النموذج
+            </button>
+            <button type="button" class="btn-primary" id="printReportBtn">
+                <i class="fas fa-print"></i> طباعة التقرير
+            </button>
+            <button type="button" class="btn-primary" id="emailReportBtn">
+                <i class="fas fa-envelope"></i> إرسال التقرير بالإيميل
+            </button>
+        </div>
+    </div>
+</div>
+<div id="actionModal" class="modal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4);">
+    <div style="background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 400px; max-width: 90%; border-radius: 5px; direction: rtl;">
+        <span id="closeModal" style="float: left; cursor: pointer; font-size: 20px;">×</span>
+        <h3 id="modalTitle" style="text-align: center;">إضافة إجراء جديد</h3>
+        <form id="actionForm">
+            <input type="hidden" id="action_entry_id" value="">
+            <input type="hidden" id="inspection_id" value="">
+            <div class="form-group">
+                <label for="action_name">نوع الإجراء</label>
+                <select id="action_name" class="form-control" required>
+                    <option value="">اختر نوع الإجراء</option>
+                    <option value="إنذار">إنذار</option>
+                    <option value="تحفظ">تحفظ</option>
+                    <option value="إغلاق مؤقت">إغلاق مؤقت</option>
+                    <option value="متابعة">متابعة</option>
+                    <option value="تصرف">تصرف</option>
+                    <option value="إعادة فتح">إعادة فتح</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="action_number">رقم الإجراء</label>
+                <input type="text" id="action_number" class="form-control">
+            </div>
+            <div class="form-group">
+                <label for="action_duration_days">المدة (يوم)</label>
+                <input type="number" id="action_duration_days" class="form-control" min="0">
+            </div>
+            <div class="form-group">
+                <label for="action_status">حالة الإجراء</label>
+                <select id="action_status" class="form-control">
+                    <option value="active">نشط</option>
+                    <option value="cancel">ملغى</option>
+                    <option value="completed">مكتمل</option>
+                </select>
+            </div>
+            <div class="button-group" style="margin-top: 20px;">
+                <button type="button" id="saveActionBtn" class="btn-primary">
+                    <i class="fas fa-save"></i> حفظ
+                </button>
+                <button type="button" id="deleteActionBtn" class="btn-danger" style="display: none;">
+                    <i class="fas fa-trash"></i> حذف
+                </button>
+                <button type="button" id="cancelActionBtn" class="btn-secondary">
+                    <i class="fas fa-times"></i> إلغاء
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
 
-// نقطة الدخول لطلبات AJAX
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // هذا السطر يضمن أن أي استجابة لطلب POST ستكون JSON، حتى لو حدث خطأ
-    header('Content-Type: application/json; charset=UTF-8');
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Elements
+    const messageDiv = document.getElementById('message');
+    const searchSection = document.getElementById('searchSection');
+    const inspectionSection = document.getElementById('inspectionSection');
+    const itemsSection = document.getElementById('itemsSection');
+    const resultsSection = document.getElementById('resultsSection');
+    const licenseNoInput = document.getElementById('licenseNo');
+    const searchBtn = document.getElementById('searchBtn');
+    const previousInspectionBtn = document.getElementById('previousFacilityBtn');
+    const nextInspectionBtn = document.getElementById('nextFacilityBtn');
+    const registerEstablishmentBtn = document.getElementById('registerEstablishmentBtn');
+    const facilityInfoDiv = document.getElementById('facilityInfo');
+    const facilityNameInput = document.getElementById('facilityName');
+    const licenseNumberDisplay = document.getElementById('licenseNumberDisplay');
+    const areaInput = document.getElementById('area');
+    const activityTypeInput = document.getElementById('activityType');
+    const uniqueIdInput = document.getElementById('uniqueId');
+    const unitInput = document.getElementById('unit');
+    const shfhspInput = document.getElementById('shfhsp');
+    const hazardClassInput = document.getElementById('hazardClass');
+    const sub_SectorInput = document.getElementById('sub_Sector');
+    const lastInspectionDateInput = document.getElementById('lastInspectionDate');
+    const lastEvaluationDateInput = document.getElementById('lastEvaluationDate');
+    const establishmentEmailInput = document.getElementById('establishmentEmail');
+    const establishmentActionButtons = document.getElementById('establishmentActionButtons');
+    const editEstablishmentBtn = document.getElementById('editEstablishmentBtn');
+    const evaluateEstablishmentBtn = document.getElementById('evaluateEstablishmentBtn');
+    const inspectionDateInput = document.getElementById('inspectionDate');
+    const inspectionTypeSelect = document.getElementById('inspectionType');
+    const campaignGroup = document.getElementById('campaignGroup');
+    const campaignNameInput = document.getElementById('campaignName');
+    const inspectorIdInput = document.getElementById('inspectorId');
+    const notesTextarea = document.getElementById('notes');
+    const createInspectionBtn = document.getElementById('createInspectionBtn');
+    const itemsContainer = document.getElementById('itemsContainer');
+    const saveItemsBtn = document.getElementById('saveItemsBtn');
+    const newInspectionBtn = document.getElementById('newInspectionBtn');
+    const deleteInspectionBtn = document.getElementById('deleteInspectionBtn');
+    const resultInspectionId = document.getElementById('resultInspectionId');
+    const resultDate = document.getElementById('resultDate');
+    const resultType = document.getElementById('resultType');
+    const resultDeducted = document.getElementById('resultDeducted');
+    const resultScore = document.getElementById('resultScore');
+    const resultPercentage = document.getElementById('resultPercentage');
+    const resultGrade = document.getElementById('resultGrade');
+    const resultCard = document.getElementById('resultCard');
+    const resultCritical = document.getElementById('resultCritical');
+    const resultMajor = document.getElementById('resultMajor');
+    const resultGeneral = document.getElementById('resultGeneral');
+    const resultAdministrative = document.getElementById('resultAdministrative');
+    const resultNextDate = document.getElementById('resultNextDate');
+    const resultNotes = document.getElementById('resultNotes');
+    const violationRefNoInput = document.getElementById('violationRefNo');
+    const totalViolationValueInput = document.getElementById('totalViolationValue');
+    const approvalStatusInput = document.getElementById('approvalStatus');
+    const approvedByInput = document.getElementById('approvedBy');
+    const approvalDateInput = document.getElementById('approvalDate');
+    const updatedByInput = document.getElementById('updatedBy');
+    const approveInspectionBtn = document.getElementById('approveInspectionBtn');
+    const editInspectionBtn = document.getElementById('editInspectionBtn');
+    const newInspectionBtnResults = document.getElementById('newInspectionBtnResults');
+    const deleteInspectionBtnResults = document.getElementById('deleteInspectionBtnResults');
+    const printReportBtn = document.getElementById('printReportBtn');
+    const emailReportBtn = document.getElementById('emailReportBtn');
+    const actionsList = document.getElementById('actionsList');
+    const addActionBtn = document.getElementById('addActionBtn');
+    const actionModal = document.getElementById('actionModal');
+    const modalTitle = document.getElementById('modalTitle');
+    const actionEntryIdInput = document.getElementById('action_entry_id');
+    const actionInspectionIdInput = document.getElementById('inspection_id');
+    const actionNameSelect = document.getElementById('action_name');
+    const actionNumberInput = document.getElementById('action_number');
+    const actionDurationInput = document.getElementById('action_duration_days');
+    const actionStatusSelect = document.getElementById('action_status');
+    const saveActionBtn = document.getElementById('saveActionBtn');
+    const deleteActionBtn = document.getElementById('deleteActionBtn');
+    const cancelActionBtn = document.getElementById('cancelActionBtn');
+    const closeModal = document.getElementById('closeModal');
+    const facilitySelectionDiv = document.getElementById('facilitySelection');
+    const facilitySelector = document.getElementById('facilitySelector');
 
-    $action = $_POST['action'] ?? '';
-    $response_data = ['success' => false, 'message' => 'إجراء غير صالح.']; // تعريف استجابة افتراضية
+    // Application Variables
+    let currentInspectionId = null;
+    let facilityUniqueId = null;
+    let inspectionCodes = [];
+    let allUserInspections = [];
+    let currentInspectionIndex = -1;
+    let isSpecificSearch = true;
+    let searchResults = [];
+    let currentResultIndex = 0;
+    let allFoundFacilities = [];
+    let currentFacilityIndex = 0;
 
-    // Get logged-in user ID (assuming it's passed or available via session)
-    // For now, using a placeholder, ideally from a session variable $_SESSION['user_id']
-    $loggedInUserId = $_POST['logged_in_user_id'] ?? 1; // Fallback to 1 if not provided for testing
+    const loggedInUserId = '<?php echo htmlspecialchars($loggedInUserId); ?>';
+    const loggedInUserName = '<?php echo htmlspecialchars($loggedInUserName); ?>';
 
-    switch ($action) {
-        case 'search_establishments':
-            $searchTerm = $_POST['searchTerm'] ?? '';
-            $establishments = [];
+    // Utility Functions
+    function showMessage(text, isSuccess) {
+        messageDiv.textContent = text;
+        messageDiv.className = isSuccess ? 'success' : 'error';
+        messageDiv.style.display = 'block';
+        setTimeout(() => {
+            messageDiv.style.display = 'none';
+        }, 5000);
+    }
 
-            // Select all relevant fields from establishments
-            $selectFields = "ID, license_no, unique_id, facility_name, brand_name, area, activity_type, hazard_class, 
-                             LicenseIssuing, ltype, sub_no, Building, detailed_activities, facility_status, unit, Sub_UNIT, site_coordinates, Sector, Sub_Sector, lstart_date, lend_date, user, area_id";
+    function resetFormVisibility() {
+        facilityInfoDiv.style.display = 'none';
+        establishmentActionButtons.style.display = 'none';
+        registerEstablishmentBtn.style.display = 'none';
+        inspectionSection.style.display = 'none';
+        itemsSection.style.display = 'none';
+        resultsSection.style.display = 'none';
+        facilityNameInput.value = '';
+        licenseNumberDisplay.value = '';
+        areaInput.value = '';
+        activityTypeInput.value = '';
+        uniqueIdInput.value = '';
+        unitInput.value = '';
+        shfhspInput.value = '';
+        hazardClassInput.value = '';
+        sub_SectorInput.value = '';
+        lastInspectionDateInput.value = '';
+        lastEvaluationDateInput.value = '';
+        establishmentEmailInput.value = '';
+        licenseNoInput.value = '';
+        facilityUniqueId = null;
+        allFoundFacilities = [];
+        currentInspectionIndex = -1;
+        inspectionDateInput.value = '<?php echo date('Y-m-d'); ?>';
+        inspectionTypeSelect.value = '';
+        campaignGroup.style.display = 'none';
+        campaignNameInput.value = '';
+        inspectorIdInput.value = loggedInUserId;
+        notesTextarea.value = '';
+        currentInspectionId = null;
+        itemsContainer.innerHTML = '';
+        resultInspectionId.textContent = '-';
+        resultDate.textContent = '-';
+        resultType.textContent = '-';
+        resultDeducted.textContent = '0.00';
+        resultScore.textContent = '1000.00';
+        resultPercentage.textContent = '100%';
+        resultGrade.textContent = '-';
+        resultCard.textContent = '-';
+        resultCritical.textContent = '0';
+        resultMajor.textContent = '0';
+        resultGeneral.textContent = '0';
+        resultAdministrative.textContent = '0';
+        resultNextDate.textContent = '-';
+        resultNotes.value = '';
+        violationRefNoInput.value = '';
+        totalViolationValueInput.value = '';
+        approvalStatusInput.value = 'Pending';
+        approvedByInput.value = '';
+        approvalDateInput.value = '';
+        updatedByInput.value = '';
+        messageDiv.style.display = 'none';
+        previousInspectionBtn.style.display = 'none';
+        nextInspectionBtn.style.display = 'none';
+        actionsList.innerHTML = '';
+    }
 
-            // If the search term is purely numeric, do an exact match on license_no
-            if (ctype_digit($searchTerm)) {
-                $stmt = $conn->prepare("SELECT $selectFields FROM establishments WHERE license_no = ? LIMIT 20");
-                if (!$stmt) {
-                    $response_data = ['success' => false, 'message' => 'خطأ في إعداد استعلام البحث بالرقم: ' . $conn->error];
-                    break;
-                }
-                $stmt->bind_param("s", $searchTerm);
-                $stmt->execute();
-                $result = $stmt->get_result();
-                while ($row = $result->fetch_assoc()) {
-                    $establishments[] = $row;
-                }
-                $stmt->close();
-            } else { // If not purely numeric, perform a LIKE search on license_no or facility_name
-                $likeSearchTerm = '%' . $searchTerm . '%';
-                $stmt = $conn->prepare("SELECT $selectFields FROM establishments WHERE license_no LIKE ? OR facility_name LIKE ? LIMIT 20");
-                if (!$stmt) {
-                    $response_data = ['success' => false, 'message' => 'خطأ في إعداد استعلام البحث بالنص: ' . $conn->error];
-                    break;
-                }
-                $stmt->bind_param("ss", $likeSearchTerm, $likeSearchTerm);
-                $stmt->execute();
-                $result = $stmt->get_result();
-                while ($row = $result->fetch_assoc()) {
-                    $establishments[] = $row;
-                }
-                $stmt->close();
-            }
-            
-            // Add last_inspection_date, taken_actions_previous (notes from last inspection), and last_evaluation_date
-            foreach ($establishments as &$est) { // Use reference to modify array directly
-                $est['last_inspection_date'] = null;
-                $est['taken_actions_previous'] = null; // Storing notes from the last inspection for simplicity
-                $est['last_evaluation_date'] = null;
+    async function searchAndLoadInspection(searchTerm, isSpecificSearch = true) {
+        if (!searchTerm && isSpecificSearch) {
+            showMessage('الرجاء إدخال رقم الرخصة أو المعرف الفريد أو اسم المنشأة.', false);
+            resetFormVisibility();
+            return;
+        }
 
-                // Get last inspection date and notes for this establishment
-                $stmt_last_insp = $conn->prepare("SELECT inspection_date, notes FROM tbl_inspections WHERE facility_unique_id = ? ORDER BY inspection_date DESC, inspection_id DESC LIMIT 1");
-                if ($stmt_last_insp) {
-                    $stmt_last_insp->bind_param("s", $est['unique_id']);
-                    $stmt_last_insp->execute();
-                    $result_last_insp = $stmt_last_insp->get_result();
-                    if ($row_last_insp = $result_last_insp->fetch_assoc()) {
-                        $est['last_inspection_date'] = $row_last_insp['inspection_date'];
-                        $est['taken_actions_previous'] = $row_last_insp['notes'];
-                    }
-                    $stmt_last_insp->close();
-                } else {
-                    error_log("Error preparing last inspection query: " . $conn->error);
-                }
+        try {
+            const formData = new FormData();
+            formData.append('action', 'search_establishments');
+            formData.append('searchTerm', searchTerm || '');
+            formData.append('isSpecificSearch', isSpecificSearch ? '1' : '0');
 
-                // Get last evaluation date for this establishment
-                // Assuming tbl_evaluation_factors exists and has assessment_date and facility_unique_id
-                $stmt_last_eval = $conn->prepare("SELECT MAX(assessment_date) AS last_eval_date FROM tbl_evaluation_factors WHERE facility_unique_id = ?");
-                if ($stmt_last_eval) {
-                    $stmt_last_eval->bind_param("s", $est['unique_id']);
-                    $stmt_last_eval->execute();
-                    $result_last_eval = $stmt_last_eval->get_result();
-                    if ($row_last_eval = $result_last_eval->fetch_assoc()) {
-                        $est['last_evaluation_date'] = $row_last_eval['last_eval_date'];
-                    }
-                    $stmt_last_eval->close();
-                } else {
-                    error_log("Error preparing last evaluation query: " . $conn->error);
-                }
-            }
-            unset($est); // Break the reference
-
-            usort($establishments, function($a, $b) {
-                return strcmp($a['license_no'], $b['license_no']);
+            const response = await fetch('api.php', {
+                method: 'POST',
+                body: formData
             });
 
-            $response_data = ['success' => true, 'data' => $establishments];
-            break;
+            const data = await response.json();
 
-        case 'create_inspection':
-            $facilityUniqueId = $_POST['facility_unique_id'] ?? '';
-            $inspectionDate = $_POST['inspection_date'] ?? '';
-            $inspectionType = $_POST['inspection_type'] ?? '';
-            $campaignName = $_POST['campaign_name'] ?? null;
-            $inspectorUserId = $_POST['inspector_user_id'] ?? 1; // Will be passed from frontend session
-            $notes = $_POST['notes'] ?? null;
-            // violation_ref_no is initially optional, set to NULL by default if not provided
-            $violationRefNo = $_POST['violation_ref_no'] ?? null; 
+            if (data.success && data.data && data.data.length > 0) {
+                allFoundFacilities = data.data;
 
-            if (empty($facilityUniqueId) || empty($inspectionDate) || empty($inspectionType)) {
-                $response_data = ['success' => false, 'message' => 'البيانات الأساسية للتفتيش غير مكتملة.'];
-                break;
-            }
+                if (allFoundFacilities.length > 1) {
+                    facilitySelector.innerHTML = '<option value="">-- اختر منشأة --</option>';
+                    allFoundFacilities.forEach(facility => {
+                        const option = document.createElement('option');
+                        option.value = facility.unique_id;
+                        option.textContent = `${facility.facility_name} (رخصة: ${facility.license_no} - المنطقة: ${facility.area} - المعرف: ${facility.unique_id})`;
+                        facilitySelector.appendChild(option);
+                    });
 
-            $stmt = $conn->prepare("INSERT INTO tbl_inspections (facility_unique_id, inspection_date, inspection_type, campaign_name, inspector_user_id, notes, violation_ref_no) VALUES (?, ?, ?, ?, ?, ?, ?)");
-            if (!$stmt) {
-                $response_data = ['success' => false, 'message' => 'خطأ في إعداد استعلام إنشاء التفتيش: ' . $conn->error];
-                break;
-            }
-            $stmt->bind_param("ssssiss", $facilityUniqueId, $inspectionDate, $inspectionType, $campaignName, $inspectorUserId, $notes, $violationRefNo);
+                    facilitySelectionDiv.style.display = 'block';
+                    facilityInfoDiv.style.display = 'none';
+                    inspectionSection.style.display = 'none';
+                    itemsSection.style.display = 'none';
+                    resultsSection.style.display = 'none';
+                    establishmentActionButtons.style.display = 'none';
+                    registerEstablishmentBtn.style.display = 'none';
 
-            if ($stmt->execute()) {
-                $newInspectionId = $conn->insert_id;
-                $response_data = ['success' => true, 'inspection_id' => $newInspectionId, 'message' => 'تم إنشاء التفتيش بنجاح.'];
+                    showMessage('تم العثور على عدة منشآت، يرجى الاختيار', true);
+
+                    facilityNameInput.value = '';
+                    areaInput.value = '';
+                    activityTypeInput.value = '';
+                    uniqueIdInput.value = '';
+                    facilityUniqueId = null;
+                } else {
+                    const facility = allFoundFacilities[0];
+                    await populateFacilityFields(facility);
+
+                    facilitySelectionDiv.style.display = 'none';
+                    facilityInfoDiv.style.display = 'block';
+                    await loadInspectionsForFacility(facility.unique_id);
+                    inspectionSection.style.display = 'block';
+                    itemsSection.style.display = 'none';
+                    resultsSection.style.display = 'none';
+                    establishmentActionButtons.style.display = 'flex';
+
+                    editEstablishmentBtn.dataset.uniqueId = facility.unique_id;
+                    evaluateEstablishmentBtn.dataset.uniqueId = facility.unique_id;
+                    registerEstablishmentBtn.style.display = 'none';
+
+                    showMessage('تم العثور على المنشأة بنجاح', true);
+                }
             } else {
-                $response_data = ['success' => false, 'message' => 'فشل إنشاء التفتيش: ' . $stmt->error];
+                showMessage('رقم الرخصة/المعرف الفريد غير موجود. هل ترغب بتسجيل منشأة جديدة؟', false);
+                resetFormVisibility();
+                registerEstablishmentBtn.style.display = 'block';
+                searchSection.style.display = 'block';
             }
-            $stmt->close();
-            break;
+        } catch (error) {
+            console.error('Error:', error);
+            showMessage('حدث خطأ أثناء البحث', false);
+            resetFormVisibility();
+            registerEstablishmentBtn.style.display = 'block';
+            searchSection.style.display = 'block';
+        }
+    }
 
-        case 'get_inspection_codes':
-            $facilityUniqueId = $_POST['facility_unique_id'] ?? null;
-            $establishmentActivityType = null;
+    async function loadFacility(facility) {
+        await populateFacilityFields(facility);
+        facilitySelectionDiv.style.display = 'none';
+        facilityInfoDiv.style.display = 'block';
+        await loadInspectionsForFacility(facility.unique_id);
+        inspectionSection.style.display = 'block';
+        itemsSection.style.display = 'none';
+        resultsSection.style.display = 'none';
+        establishmentActionButtons.style.display = 'flex';
+        editEstablishmentBtn.dataset.uniqueId = facility.unique_id;
+        evaluateEstablishmentBtn.dataset.uniqueId = facility.unique_id;
+        showMessage('تم تحميل المنشأة بنجاح', true);
+    }
 
-            if ($facilityUniqueId) {
-                $stmt = $conn->prepare("SELECT activity_type FROM establishments WHERE unique_id = ?");
-                $stmt->bind_param("s", $facilityUniqueId);
-                $stmt->execute();
-                $result = $stmt->get_result();
-                $establishment = $result->fetch_assoc();
-                if ($establishment) {
-                    $establishmentActivityType = trim($establishment['activity_type']);
+    document.getElementById('searchFullLicenseBtn').addEventListener('click', () => {
+        const licenseNo = document.getElementById('fullLicenseSearch').value.trim();
+
+        if (!licenseNo) {
+            showMessage('يرجى إدخال رقم الرخصة.', false);
+            return;
+        }
+
+        fetch('api.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'search_establishments',
+                searchTerm: licenseNo,
+                isSpecificSearch: true
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+                searchResults = data.data;
+                currentResultIndex = 0;
+                loadFacility(searchResults[currentResultIndex]);
+            } else {
+                showMessage('لم يتم العثور على منشآت برقم الرخصة المحدد.', false);
+            }
+        })
+        .catch(err => {
+            console.error('Error during search:', err);
+            showMessage('حدث خطأ أثناء البحث.', false);
+        });
+    });
+
+    document.getElementById('previousFacilityBtn').addEventListener('click', () => {
+        if (searchResults.length > 0 && currentResultIndex > 0) {
+            currentResultIndex--;
+            loadFacility(searchResults[currentResultIndex]);
+        }
+    });
+
+    document.getElementById('nextFacilityBtn').addEventListener('click', () => {
+        if (searchResults.length > 0 && currentResultIndex < searchResults.length - 1) {
+            currentResultIndex++;
+            loadFacility(searchResults[currentResultIndex]);
+        }
+    });
+
+    async function populateFacilityFields(facility) {
+        facilityNameInput.value = facility.facility_name || '';
+        licenseNumberDisplay.value = facility.license_no || '';
+        areaInput.value = facility.area || '';
+        activityTypeInput.value = facility.activity_type || '';
+        uniqueIdInput.value = facility.unique_id || '';
+        facilityUniqueId = facility.unique_id;
+        unitInput.value = facility.unit || '';
+        shfhspInput.value = facility.shfhsp || '';
+        hazardClassInput.value = facility.hazard_class || '';
+        sub_SectorInput.value = facility.Sub_Sector || '';
+        lastInspectionDateInput.value = facility.last_inspection_date || '';
+        lastEvaluationDateInput.value = facility.last_evaluation_date || '';
+        establishmentEmailInput.value = facility.email || '';
+        facilityInfoDiv.style.display = 'block';
+        inspectionSection.style.display = 'block';
+        resultsSection.style.display = 'block';
+        itemsSection.style.display = 'block';
+        establishmentActionButtons.style.display = 'flex';
+    }
+
+    async function loadInspectionsForFacility(uniqueId) {
+        try {
+            const formData = new FormData();
+            formData.append('action', 'get_facility_inspections');
+            formData.append('facility_unique_id', uniqueId);
+            formData.append('inspector_user_id', loggedInUserId);
+
+            const response = await fetch('api.php', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (data.success && data.data && data.data.length > 0) {
+                allUserInspections = data.data.sort((a, b) => new Date(b.inspection_date) - new Date(a.inspection_date));
+                currentInspectionIndex = 0;
+                displayInspection(allUserInspections[currentInspectionIndex].inspection_id);
+                previousInspectionBtn.style.display = 'block';
+                nextInspectionBtn.style.display = 'block';
+            } else {
+                allUserInspections = [];
+                currentInspectionIndex = -1;
+                showMessage('لا توجد تفتيشات سابقة لهذه المنشأة.', true);
+                previousInspectionBtn.style.display = 'none';
+                nextInspectionBtn.style.display = 'none';
+            }
+        } catch (error) {
+            console.error('Error loading inspections for facility:', error);
+            showMessage('حدث خطأ أثناء تحميل تفتيشات المنشأة.', false);
+        }
+    }
+
+    async function displayInspection(inspectionId) {
+        try {
+            const formData = new FormData();
+            formData.append('action', 'get_inspection_details');
+            formData.append('inspection_id', inspectionId);
+            formData.append('inspector_user_id', loggedInUserId);
+
+            const response = await fetch('api.php', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (data.success && data.inspection) {
+                const inspection = data.inspection;
+                currentInspectionId = inspection.inspection_id;
+
+                inspectionDateInput.value = inspection.inspection_date;
+                inspectionTypeSelect.value = inspection.inspection_type;
+
+                if (inspection.inspection_type === 'حملة') {
+                    campaignGroup.style.display = 'block';
+                    campaignNameInput.value = inspection.campaign_name || '';
+                } else {
+                    campaignGroup.style.display = 'none';
+                    campaignNameInput.value = '';
                 }
-                $stmt->close();
+
+                inspectorIdInput.value = inspection.inspector_user_id;
+                notesTextarea.value = inspection.notes || '';
+
+                resultInspectionId.textContent = inspection.inspection_id;
+                resultDate.textContent = inspection.inspection_date;
+                resultType.textContent = inspection.inspection_type;
+                resultDeducted.textContent = parseFloat(inspection.total_deducted_points || 0).toFixed(2);
+                resultScore.textContent = parseFloat(inspection.final_inspection_score || 0).toFixed(2);
+                resultPercentage.textContent = parseFloat(inspection.percentage_score || 0).toFixed(2) + '%';
+                resultGrade.textContent = inspection.letter_grade || '-';
+                resultCard.textContent = inspection.color_card || '-';
+                resultCritical.textContent = inspection.critical_violations || 0;
+                resultMajor.textContent = inspection.major_violations || 0;
+                resultGeneral.textContent = inspection.general_violations || 0;
+                resultAdministrative.textContent = inspection.administrative_violations || 0;
+                resultNextDate.textContent = inspection.next_inspection_date || 'غير محدد';
+                resultNotes.value = inspection.notes || '';
+
+                violationRefNoInput.value = inspection.violation_ref_no || '';
+                totalViolationValueInput.value = parseFloat(inspection.total_violation_value || 0).toFixed(2);
+                approvalStatusInput.value = inspection.approval_status || 'Pending';
+                approvedByInput.value = inspection.approved_by_username || '';
+                approvalDateInput.value = inspection.approval_date || '';
+                updatedByInput.value = inspection.updated_by_username || '';
+
+                inspectionSection.style.display = 'block';
+                itemsSection.style.display = 'block';
+                resultsSection.style.display = 'block';
+
+                await loadInspectionItems(true, inspectionId);
+                await loadInspectionActions(inspectionId);
+
+                showMessage('تم تحميل بيانات التفتيش بنجاح.', true);
+                previousInspectionBtn.disabled = (currentInspectionIndex <= 0);
+                nextInspectionBtn.disabled = (currentInspectionIndex >= allUserInspections.length - 1);
+            } else {
+                showMessage(data.message || 'فشل جلب بيانات التفتيش.', false);
+                resetFormVisibility();
             }
+        } catch (error) {
+            console.error('Error displaying inspection:', error);
+            showMessage('حدث خطأ أثناء عرض بيانات التفتيش.', false);
+        }
+    }
 
-            $codes = [];
-            
-            $query = "SELECT code_id, code_description, code_category, standard_reference, fixed_corrective_action, default_action_type 
-                      FROM tbl_inspection_code 
-                      WHERE activity_type = 'All' ";
-            
-            $params = [];
-            $types = "";
+    async function loadInspectionActions(inspectionId) {
+        try {
+            const response = await fetch(`inspection_actions_api.php?action=get_all&inspection_id=${inspectionId}`);
+            const data = await response.json();
 
-            if ($establishmentActivityType) {
-                // Split activity types by comma or Arabic comma
-                $activityTypesArray = array_map('trim', explode(',', str_replace('،', ',', $establishmentActivityType)));
-                $activityTypeConditions = [];
-                foreach ($activityTypesArray as $type) {
-                    $activityTypeConditions[] = "FIND_IN_SET(?, REPLACE(activity_type, '،', ',')) > 0";
-                    $params[] = $type;
-                    $types .= "s";
-                }
-                if (!empty($activityTypeConditions)) {
-                    $query .= " OR (" . implode(' OR ', $activityTypeConditions) . ")";
-                }
+            if (data.success && data.actions) {
+                actionsList.innerHTML = '';
+                data.actions.forEach(action => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${action.action_name}</td>
+                        <td>${action.action_number || '-'}</td>
+                        <td>${action.action_duration_days || '-'}</td>
+                        <td>${getActionStatusText(action.action_status)}</td>
+                        <td>${action.created_at}</td>
+                        <td>
+                            <button type="button" class="btn-secondary edit-action-btn" data-action-id="${action.action_entry_id}" style="padding: 3px 8px; font-size: 12px;">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                        </td>
+                    `;
+                    actionsList.appendChild(row);
+                });
+
+                document.querySelectorAll('.edit-action-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const actionId = this.getAttribute('data-action-id');
+                        openActionModal(actionId);
+                    });
+                });
+            } else {
+                actionsList.innerHTML = '<tr><td colspan="6" style="text-align: center;">لا توجد إجراءات مسجلة</td></tr>';
             }
-            
-            $query .= " ORDER BY code_category DESC, code_id ASC";
-            
-            $stmt = $conn->prepare($query);
-            if (!$stmt) {
-                $response_data = ['success' => false, 'message' => 'خطأ في إعداد استعلام بنود التفتيش: ' . $conn->error];
-                break;
-            }
-            
-            if (!empty($params)) {
-                call_user_func_array([$stmt, 'bind_param'], array_merge([$types], $params));
-            }
-            
-            $stmt->execute();
-            $result = $stmt->get_result();
-            while ($row = $result->fetch_assoc()) {
-                $codes[] = $row;
-            }
-            $stmt->close();
+        } catch (error) {
+            console.error('Error loading inspection actions:', error);
+            actionsList.innerHTML = '<tr><td colspan="6" style="text-align: center; color: red;">حدث خطأ أثناء تحميل الإجراءات</td></tr>';
+        }
+    }
 
-            $response_data = ['success' => true, 'data' => $codes];
-            break;
-            
-        case 'check_previous_violation':
-            $facilityUniqueId = $_POST['facility_unique_id'] ?? null;
-            $codeId = $_POST['code_id'] ?? null;
+    function getActionStatusText(status) {
+        switch(status) {
+            case 'active': return 'نشط';
+            case 'cancel': return 'ملغى';
+            case 'completed': return 'مكتمل';
+            default: return status;
+        }
+    }
 
-            if (!$facilityUniqueId || !$codeId) {
-                $response_data = ['success' => false, 'message' => 'بيانات غير كافية للتحقق من المخالفات السابقة.'];
-                break;
-            }
+    function openActionModal(actionId = null) {
+        if (actionId) {
+            modalTitle.textContent = 'تعديل الإجراء';
+            deleteActionBtn.style.display = 'block';
 
-            $repeated_count = 0;
-
-            // Get the inspection_ids of the last 3 *previous* inspections for this facility
-            $stmt_prev_inspections = $conn->prepare("
-                SELECT i.inspection_id
-                FROM tbl_inspections i
-                WHERE i.facility_unique_id = ?
-                ORDER BY i.inspection_date DESC, i.inspection_id DESC
-                LIMIT 3
-            ");
-            if ($stmt_prev_inspections) {
-                $stmt_prev_inspections->bind_param("s", $facilityUniqueId);
-                $stmt_prev_inspections->execute();
-                $result_prev_inspections = $stmt_prev_inspections->get_result();
-
-                $previous_inspection_ids = [];
-                while ($row_prev = $result_prev_inspections->fetch_assoc()) {
-                    $previous_inspection_ids[] = $row_prev['inspection_id'];
-                }
-                $stmt_prev_inspections->close();
-
-                if (!empty($previous_inspection_ids)) {
-                    $placeholders = implode(',', array_fill(0, count($previous_inspection_ids), '?'));
-                    $types = str_repeat('i', count($previous_inspection_ids));
-
-                    // Count violations of this specific code_id in those previous inspections
-                    $stmt_violation_count = $conn->prepare("
-                        SELECT COUNT(*) AS violation_count
-                        FROM tbl_inspection_items
-                        WHERE code_id = ? AND is_violation = 1 AND inspection_id IN ($placeholders)
-                    ");
-                    if ($stmt_violation_count) {
-                        $params_violation_count = array_merge([$types . 'i'], [$codeId], $previous_inspection_ids);
-                        $ref_params = [];
-                        foreach ($params_violation_count as $key => $value) {
-                            $ref_params[$key] = &$params_violation_count[$key];
-                        }
-                        call_user_func_array([$stmt_violation_count, 'bind_param'], $ref_params);
-
-                        $stmt_violation_count->execute();
-                        $result_violation_count = $stmt_violation_count->get_result();
-                        $row_violation_count = $result_violation_count->fetch_assoc();
-                        $repeated_count = $row_violation_count['violation_count'] ?? 0;
-                        $stmt_violation_count->close();
+            fetch(`inspection_actions_api.php?action=get&action_entry_id=${actionId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        actionEntryIdInput.value = data.action.action_entry_id;
+                        actionInspectionIdInput.value = data.action.inspection_id;
+                        actionNameSelect.value = data.action.action_name;
+                        actionNumberInput.value = data.action.action_number || '';
+                        actionDurationInput.value = data.action.action_duration_days || '';
+                        actionStatusSelect.value = data.action.action_status || 'active';
                     } else {
-                        error_log("Failed to prepare stmt_violation_count in check_previous_violation: " . $conn->error);
+                        showMessage('فشل تحميل بيانات الإجراء', false);
+                    }
+                });
+        } else {
+            modalTitle.textContent = 'إضافة إجراء جديد';
+            deleteActionBtn.style.display = 'none';
+            actionEntryIdInput.value = '';
+            actionInspectionIdInput.value = currentInspectionId;
+            actionNameSelect.value = '';
+            actionNumberInput.value = '';
+            actionDurationInput.value = '';
+            actionStatusSelect.value = 'active';
+        }
+
+        actionModal.style.display = 'block';
+    }
+
+    function closeActionModal() {
+        actionModal.style.display = 'none';
+    }
+
+    async function saveAction() {
+        const formData = new FormData();
+        formData.append('action', actionEntryIdInput.value ? 'update' : 'create');
+        formData.append('action_entry_id', actionEntryIdInput.value);
+        formData.append('inspection_id', actionInspectionIdInput.value);
+        formData.append('action_name', actionNameSelect.value);
+        formData.append('action_number', actionNumberInput.value);
+        formData.append('action_duration_days', actionDurationInput.value);
+        formData.append('action_status', actionStatusSelect.value);
+
+        try {
+            const response = await fetch('inspection_actions_api.php', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showMessage('تم حفظ الإجراء بنجاح', true);
+                closeActionModal();
+                await loadInspectionActions(currentInspectionId);
+            } else {
+                showMessage(data.message || 'فشل حفظ الإجراء', false);
+            }
+        } catch (error) {
+            console.error('Error saving action:', error);
+            showMessage('حدث خطأ أثناء حفظ الإجراء', false);
+        }
+    }
+
+    async function deleteAction() {
+        const actionId = actionEntryIdInput.value;
+        if (!actionId) return;
+
+        if (confirm('هل أنت متأكد من حذف هذا الإجراء؟')) {
+            try {
+                const response = await fetch('inspection_actions_api.php', {
+                    method: 'POST',
+                    body: new URLSearchParams({
+                        action: 'delete',
+                        action_entry_id: actionId
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showMessage('تم حذف الإجراء بنجاح', true);
+                    closeActionModal();
+                    await loadInspectionActions(currentInspectionId);
+                } else {
+                    showMessage(data.message || 'فشل حذف الإجراء', false);
+                }
+            } catch (error) {
+                console.error('Error deleting action:', error);
+                showMessage('حدث خطأ أثناء حذف الإجراء', false);
+            }
+        }
+    }
+
+    searchBtn.addEventListener('click', () => searchAndLoadInspection(licenseNoInput.value.trim()));
+
+    previousInspectionBtn.addEventListener('click', () => {
+        if (currentInspectionIndex < allUserInspections.length - 1) {
+            currentInspectionIndex++;
+            displayInspection(allUserInspections[currentInspectionIndex].inspection_id);
+        }
+    });
+
+    nextInspectionBtn.addEventListener('click', () => {
+        if (currentInspectionIndex > 0) {
+            currentInspectionIndex--;
+            displayInspection(allUserInspections[currentInspectionIndex].inspection_id);
+        }
+    });
+
+    registerEstablishmentBtn.addEventListener('click', () => {
+        const licenseNo = licenseNoInput.value.trim();
+        window.location.href = `form_est.php?license_no=${encodeURIComponent(licenseNo)}`;
+    });
+
+    editEstablishmentBtn.addEventListener('click', () => {
+        const uniqueId = uniqueIdInput.value;
+        if (uniqueId) {
+            window.location.href = `form_est.php?unique_id=${encodeURIComponent(uniqueId)}`;
+        } else {
+            showMessage('لا يمكن تعديل المنشأة، المعرف الفريد غير موجود.', false);
+        }
+    });
+
+    evaluateEstablishmentBtn.addEventListener('click', () => {
+        const uniqueId = uniqueIdInput.value;
+        if (uniqueId) {
+            window.location.href = `evaluation_form.php?unique_id=${encodeURIComponent(uniqueId)}`;
+        } else {
+            showMessage('لا يمكن تقييم المنشأة، المعرف الفريد غير موجود.', false);
+        }
+    });
+
+    inspectionTypeSelect.addEventListener('change', function() {
+        if (this.value === 'حملة') {
+            campaignGroup.style.display = 'block';
+        } else {
+            campaignGroup.style.display = 'none';
+            campaignNameInput.value = '';
+        }
+    });
+
+    createInspectionBtn.addEventListener('click', async function() {
+        if (!facilityUniqueId) {
+            showMessage('الرجاء البحث عن منشأة أولاً وتحديدها', false);
+            return;
+        }
+
+        if (!inspectionDateInput.value || !inspectionTypeSelect.value) {
+            showMessage('الرجاء تعبئة جميع الحقول المطلوبة', false);
+            return;
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('action', 'create_inspection');
+            formData.append('facility_unique_id', facilityUniqueId);
+            formData.append('inspection_date', inspectionDateInput.value);
+            formData.append('inspection_type', inspectionTypeSelect.value);
+            formData.append('inspector_user_id', inspectorIdInput.value);
+
+            if (inspectionTypeSelect.value === 'حملة' && campaignNameInput.value) {
+                formData.append('campaign_name', campaignNameInput.value);
+            }
+
+            if (notesTextarea.value) {
+                formData.append('notes', notesTextarea.value);
+            }
+
+            const response = await fetch('api.php', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                currentInspectionId = data.inspection_id;
+
+                resultInspectionId.textContent = currentInspectionId;
+                resultDate.textContent = inspectionDateInput.value;
+                resultType.textContent = inspectionTypeSelect.value;
+                resultNotes.value = notesTextarea.value;
+
+                inspectionSection.style.display = 'none';
+                itemsSection.style.display = 'block';
+                resultsSection.style.display = 'none';
+
+                await loadInspectionItems();
+
+                showMessage('تم إنشاء التفتيش بنجاح', true);
+            } else {
+                showMessage(data.message || 'فشل إنشاء التفتيش', false);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showMessage('حدث خطأ أثناء إنشاء التفتيش', false);
+        }
+    });
+
+    async function loadInspectionItems(isEditingExisting = false, inspectionIdToLoad = null) {
+        itemsContainer.innerHTML = 'جارٍ تحميل بنود التفتيش...';
+
+        try {
+            const formData = new FormData();
+            formData.append('action', 'get_inspection_codes');
+            formData.append('facility_unique_id', facilityUniqueId);
+
+            if (isEditingExisting && inspectionIdToLoad) {
+                formData.append('inspection_id', inspectionIdToLoad);
+            }
+
+            const response = await fetch('api.php', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (data.success && data.data && data.data.length > 0) {
+                inspectionCodes = data.data;
+                renderInspectionItems();
+            } else {
+                itemsContainer.innerHTML = '<p>لا توجد بنود تفتيش متاحة</p>';
+                showMessage('لا توجد بنود تفتيش لهذه المنشأة', false);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            itemsContainer.innerHTML = '<p style="color:red;">حدث خطأ أثناء تحميل البنود</p>';
+            showMessage('حدث خطأ أثناء تحميل بنود التفتيش', false);
+        }
+    }
+
+    async function renderInspectionItems() {
+        itemsContainer.innerHTML = '';
+
+        for (const item of inspectionCodes) {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'item-row';
+
+            let previousViolationIndicator = '';
+            let isRepeatedViolation = false;
+            let repeatedCount = 0;
+
+            try {
+                const prevViolationsForm = new FormData();
+                prevViolationsForm.append('action', 'check_previous_violation');
+                prevViolationsForm.append('facility_unique_id', facilityUniqueId);
+                prevViolationsForm.append('code_id', item.code_id);
+
+                const prevViolationsResponse = await fetch('api.php', {
+                    method: 'POST',
+                    body: prevViolationsForm
+                });
+
+                const prevViolationsData = await prevViolationsResponse.json();
+
+                if (prevViolationsData.success) {
+                    isRepeatedViolation = prevViolationsData.is_repeated_violation;
+                    repeatedCount = prevViolationsData.repeated_count || 0;
+
+                    if (isRepeatedViolation) {
+                        previousViolationIndicator = '<span class="previous-violation-indicator">مخالفة سابقة</span>';
                     }
                 }
-            } else {
-                error_log("Failed to prepare stmt_prev_inspections in check_previous_violation: " . $conn->error);
+            } catch (error) {
+                console.error('Error checking previous violation:', error);
             }
 
-            $isRepeatedViolation = ($repeated_count > 0);
-            $response_data = ['success' => true, 'is_repeated_violation' => $isRepeatedViolation, 'repeated_count' => $repeated_count];
-            break;
+            const existingItemData = item.inspection_item_data || {};
+            const isViolationChecked = existingItemData.is_violation === 1;
+            const preselectedAction = existingItemData.action_taken || '';
+            const preselectedConditionLevel = existingItemData.condition_level || '';
+            const preselectedDeductedPoints = parseFloat(existingItemData.deducted_points || 0).toFixed(2);
+            const preselectedWarningDuration = existingItemData.warning_duration || ''; // This variable is not used anywhere, seems to be a remnant.
+            const preselectedViolationValue = existingItemData.violation_value || '';
+            const preselectedNotes = existingItemData.inspector_notes || '';
+            const preselectedPhotoPath = existingItemData.inspection_photo_path || '';
 
- case 'save_inspection_items':
-            $inspection_id = $_POST['inspection_id'] ?? null;
-            $inspection_items_data = json_decode($_POST['items_data'], true) ?? [];
-            // Added violation_ref_no and updated_by_user_id for potential update
-            $violationRefNo = $_POST['violation_ref_no'] ?? null; 
-            $updatedByUserId = $loggedInUserId; // From the assumed logged-in user ID at the top
+            itemDiv.innerHTML = `
+                <div class="item-header">
+                    <p><strong>${item.code_id} - ${item.code_description}</strong> ${previousViolationIndicator}</p>
+                    <div class="violation-toggle-group">
+                        <label class="switch">
+                            <input type="checkbox" id="isViolation_${item.code_id}" class="is-violation-checkbox" data-code-id="${item.code_id}" ${isViolationChecked ? 'checked' : ''}>
+                            <span class="slider round"></span>
+                        </label>
+                        <span>هل يوجد مخالفة؟</span>
+                    </div>
+                </div>
+                <div class="item-details-expanded">
+                    <p><strong>الفئة:</strong> ${item.code_category || 'N/A'}</p>
+                    <p><strong>تصنيف البند:</strong> ${item.code_categorized || 'N/A'}</p>
+                    <p><strong> الإجراء الافتراضي:</strong> ${item.default_action_type || 'N/A'}</p>
+                    <p><strong>الإجراء التصحيحي:</strong> ${item.fixed_corrective_action || 'N/A'}</p>
+                    <p><strong>قيمة المخالفة:</strong> ${item.violation_value_text || 'N/A'}</p>
+                    <p><strong>المراجع:</strong> ${item.standard_reference || 'N/A'}</p>
+                </div>
+                <div class="violation-details ${isViolationChecked ? '' : 'hidden'}">
+                    <div class="form-group">
+                        <label>الإجراء المتخذ</label>
+                        <select class="action-select" data-code-id="${item.code_id}" data-code-category="${item.code_category}" data-is-repeated-violation="${isRepeatedViolation ? '1' : '0'}" data-initial-repeated-count="${repeatedCount}">
+                            <option value="">-- اختر الإجراء --</option>
+                            <option value="لا يوجد إجراء" ${preselectedAction === 'لا يوجد إجراء' ? 'selected' : ''}>لا يوجد إجراء</option>
+                            <option value="إجراء تصحيحي" ${preselectedAction === 'إجراء تصحيحي' ? 'selected' : ''}>إجراء تصحيحي</option>
+                            <option value="انذار" ${preselectedAction === 'انذار' ? 'selected' : ''}>انذار</option>
+                            <option value="مخالفة" ${preselectedAction === 'مخالفة' ? 'selected' : ''}>مخالفة</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>مستوى الحالة</label>
+                        <input type="text" class="condition-level-display" data-code-id="${item.code_id}"
+                               value="${preselectedConditionLevel}" readonly class="readonly">
+                    </div>
+                    <div class="form-group">
+                        <label>النقاط المخصومة</label>
+                        <input type="number" class="points-input" data-code-id="${item.code_id}"
+                               value="${preselectedDeductedPoints}" step="0.01" readonly class="readonly">
+                    </div>
+                    <div class="form-group">
+                        <label>عدد التكرارات السابقة</label>
+                        <input type="text" class="repeated-count-display" data-code-id="${item.code_id}"
+                               value="${repeatedCount}" readonly class="readonly">
+                    </div>
+                    <div class="form-group violation-value-group ${preselectedAction === 'مخالفة' ? '' : 'hidden'}">
+                        <label>قيمة المخالفة</label>
+                        <input type="number" class="violation-value-input" data-code-id="${item.code_id}"
+                               placeholder="أدخل قيمة المخالفة" step="0.01" value="${preselectedViolationValue}">
+                    </div>
+                    <div class="form-group">
+                        <label>صورة التفتيش</label>
+                        <input type="file" accept="image/*" capture="environment" class="inspection-photo-input" data-code-id="${item.code_id}" style="display: none;">
+                        <button type="button" class="capture-photo-btn" data-code-id="${item.code_id}" data-inspection-id="${currentInspectionId}">التقاط صورة</button>
+                        <div class="photo-preview-container" data-code-id="${item.code_id}">
+                            ${preselectedPhotoPath ? `<img src="${preselectedPhotoPath}" alt="Inspection Photo">` : ''}
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>ملاحظات المفتش</label>
+                        <textarea class="notes-input" data-code-id="${item.code_id}"
+                                  placeholder="ملاحظات إضافية">${preselectedNotes}</textarea>
+                    </div>
+                </div>
+            `;
+            itemsContainer.appendChild(itemDiv);
 
-            if (!$inspection_id || empty($inspection_items_data)) {
-                $response_data = ['success' => false, 'message' => 'بيانات غير كافية لحفظ بنود التفتيش.'];
-                break;
-            }
+            const isViolationCheckbox = itemDiv.querySelector('.is-violation-checkbox');
+            const violationDetailsDiv = itemDiv.querySelector('.violation-details');
+            const actionSelect = itemDiv.querySelector('.action-select');
+            const conditionLevelDisplay = itemDiv.querySelector('.condition-level-display');
+            const pointsInput = itemDiv.querySelector('.points-input');
+            const violationValueGroup = itemDiv.querySelector('.violation-value-group');
+            const violationValueInput = itemDiv.querySelector('.violation-value-input');
+            const notesInput = itemDiv.querySelector('.notes-input');
+            const capturePhotoBtn = itemDiv.querySelector('.capture-photo-btn');
+            const inspectionPhotoInput = itemDiv.querySelector('.inspection-photo-input');
+            const photoPreviewContainer = itemDiv.querySelector('.photo-preview-container');
+            const viewPhotoBtn = photoPreviewContainer.querySelector('.view-photo-btn');
+            const deletePhotoBtn = photoPreviewContainer.querySelector('.delete-photo-btn');
 
-            $current_facility_unique_id = null;
-            $stmt_facility = $conn->prepare("SELECT facility_unique_id FROM tbl_inspections WHERE inspection_id = ?");
-            if ($stmt_facility) {
-                $stmt_facility->bind_param("i", $inspection_id);
-                $stmt_facility->execute();
-                $result_facility = $stmt_facility->get_result();
-                $row_facility = $result_facility->fetch_assoc();
-                if ($row_facility) {
-                    $current_facility_unique_id = $row_facility['facility_unique_id'];
+
+            function toggleViolationFields(enable) {
+                actionSelect.disabled = !enable;
+                notesInput.disabled = !enable;
+                capturePhotoBtn.disabled = !enable;
+                violationValueInput.disabled = !enable;
+
+                if (!enable) {
+                    actionSelect.value = '';
+                    conditionLevelDisplay.value = '';
+                    pointsInput.value = '0.00';
+                    pointsInput.dataset.conditionLevel = '';
+                    violationValueGroup.style.display = 'none';
+                    violationValueInput.value = '';
+                    notesInput.value = '';
+                    photoPreviewContainer.innerHTML = '';
+                } else {
+                    const currentAction = actionSelect.value;
+                    if (currentAction === 'مخالفة') {
+                        violationValueGroup.style.display = 'block';
+                    } else {
+                        violationValueGroup.style.display = 'none';
+                    }
                 }
-                $stmt_facility->close();
-            } else {
-                $response_data = ['success' => false, 'message' => 'خطأ في إعداد استعلام جلب معرف المنشأة: ' . $conn->error];
-                break;
             }
 
-            $conn->begin_transaction();
-            $errors = [];
-            $successCount = 0;
-
-            // Delete existing items for this inspection to prevent duplicates on resubmission
-            $delete_stmt = $conn->prepare("DELETE FROM tbl_inspection_items WHERE inspection_id = ?");
-            if (!$delete_stmt) {
-                $errors[] = "خطأ في إعداد استعلام حذف البنود القديمة: " . $conn->error;
-                $conn->rollback();
-                $response_data = ['success' => false, 'message' => $errors[0]];
-                break;
-            }
-            $delete_stmt->bind_param("i", $inspection_id);
-            $delete_stmt->execute();
-            $delete_stmt->close();
-
-            foreach ($inspection_items_data as $item) {
-                $code_id = intval($item['code_id']);
-                $action_taken = $item['action_taken'] ?? null;
-                $condition_level = $item['condition_level'] ?? 'N/A';
-                $deducted_points = isset($item['deducted_points']) ? floatval($item['deducted_points']) : 0.00;
-                $immediate_correction = $item['immediate_correction'] ?? null;
-                $inspector_notes = $item['inspector_notes'] ?? null;
-                $violation_value = isset($item['violation_value']) ? floatval($item['violation_value']) : null; // Get violation_value
-
-                $is_violation = ($action_taken === 'مخالفة') ? 1 : 0;
-                $repeated_count = 0; 
-
-                // Only process items that have an action, or if it's a violation with 0 deducted points (e.g. for a warning)
-                // This condition needs to be carefully aligned with frontend logic.
-                // If action_taken is 'إجراء تصحيحي', it should save but with 0 points.
-                // If action_taken is 'انذار', it should save with its points.
-                // If is_violation is 0 (not a violation), and action_taken is also null/empty, then skip.
-                if (empty($action_taken)) {
-                    continue; 
+            isViolationCheckbox.addEventListener('change', function() {
+                if (this.checked) {
+                    violationDetailsDiv.style.display = 'block';
+                    toggleViolationFields(true);
+                    actionSelect.dispatchEvent(new Event('change'));
+                } else {
+                    violationDetailsDiv.style.display = 'none';
+                    toggleViolationFields(false);
                 }
+            });
 
-                if (!$code_id) { 
-                    $errors[] = "بيانات البند ناقصة (كود).";
-                    continue;
-                }
+            // Initial state based on existing data
+            toggleViolationFields(isViolationChecked);
+            actionSelect.dispatchEvent(new Event('change'));
 
-                // Calculate repeated_count only if the current item is a violation
-                if ($is_violation === 1 && $current_facility_unique_id) {
-                    $stmt_prev_inspections = $conn->prepare("
-                        SELECT i.inspection_id
-                        FROM tbl_inspections i
-                        WHERE i.facility_unique_id = ? AND i.inspection_id != ?
-                        ORDER BY i.inspection_date DESC, i.inspection_id DESC
-                        LIMIT 3
-                    ");
-                    if ($stmt_prev_inspections) {
-                        $stmt_prev_inspections->bind_param("si", $current_facility_unique_id, $inspection_id);
-                        $stmt_prev_inspections->execute();
-                        $result_prev_inspections = $stmt_prev_inspections->get_result();
+            actionSelect.addEventListener('change', function() {
+                const selectedAction = this.value;
+                const codeCategory = this.dataset.codeCategory;
+                const isRepeated = this.dataset.isRepeatedViolation === '1';
+                let conditionLevel = '';
 
-                        $previous_inspection_ids = [];
-                        while ($row_prev = $result_prev_inspections->fetch_assoc()) {
-                            $previous_inspection_ids[] = $row_prev['inspection_id'];
-                        }
-                        $stmt_prev_inspections->close();
+                // Assuming warningDurationGroup and warningDurationInput are for a specific field,
+                // which is not explicitly defined in the provided snippets.
+                // If these are not defined, they might throw an error. Commenting them out for now.
+                // warningDurationGroup.style.display = 'none';
+                // warningDurationInput.disabled = true;
 
-                        if (!empty($previous_inspection_ids)) {
-                            $placeholders = implode(',', array_fill(0, count($previous_inspection_ids), '?'));
-                            $types = str_repeat('i', count($previous_inspection_ids));
+                violationValueGroup.style.display = 'none';
+                violationValueInput.disabled = true;
 
-                            $stmt_violation_count = $conn->prepare("
-                                SELECT COUNT(*) AS violation_count
-                                FROM tbl_inspection_items
-                                WHERE code_id = ? AND is_violation = 1 AND inspection_id IN ($placeholders)
-                            ");
-                            if ($stmt_violation_count) {
-                                $params_violation_count = array_merge([$types . 'i'], [$code_id], $previous_inspection_ids);
-                                $ref_params = [];
-                                foreach ($params_violation_count as $key => $value) {
-                                    $ref_params[$key] = &$params_violation_count[$key];
-                                }
-                                call_user_func_array([$stmt_violation_count, 'bind_param'], $ref_params);
+                if (selectedAction) {
+                    let points = 0;
 
-                                $stmt_violation_count->execute();
-                                $result_violation_count = $stmt_violation_count->get_result();
-                                $row_violation_count = $result_violation_count->fetch_assoc();
-                                $repeated_count = $row_violation_count['violation_count'] ?? 0;
-                                $stmt_violation_count->close();
+                    if (selectedAction === 'إجراء تصحيحي') {
+                        conditionLevel = 'Condition I';
+                        points = 0;
+                    } else if (selectedAction === 'انذار') {
+                        conditionLevel = 'Condition II';
+                        points = calculatePoints(codeCategory, conditionLevel);
+                        // warningDurationGroup.style.display = 'block';
+                        // warningDurationInput.disabled = false;
+                    } else if (selectedAction === 'مخالفة') {
+                        if (isRepeated) {
+                            conditionLevel = 'Condition V';
+                        } else {
+                            if (codeCategory === 'Critical') {
+                                conditionLevel = 'Condition IV';
+                            } else if (codeCategory === 'Major' || codeCategory === 'General') {
+                                conditionLevel = 'Condition III';
                             } else {
-                                error_log("Failed to prepare stmt_violation_count: " . $conn->error);
+                                conditionLevel = 'Condition III'; // Default for other categories if not Critical/Major/General
                             }
                         }
+                        points = calculatePoints(codeCategory, conditionLevel);
+                        violationValueGroup.style.display = 'block';
+                        violationValueInput.disabled = false;
                     } else {
-                        error_log("Failed to prepare stmt_prev_inspections: " . $conn->error);
+                        conditionLevel = 'N/A';
+                        points = 0;
                     }
+                    conditionLevelDisplay.value = conditionLevel;
+                    pointsInput.value = points.toFixed(2);
+                    pointsInput.dataset.conditionLevel = conditionLevel;
+                } else {
+                    conditionLevelDisplay.value = '';
+                    pointsInput.value = '0.00';
+                    pointsInput.dataset.conditionLevel = '';
                 }
-case 'save_inspection_items':
-    $inspection_id = $_POST['inspection_id'] ?? null;
-    $inspection_items_data = json_decode($_POST['items_data'], true) ?? [];
-    // Added violation_ref_no and updated_by_user_id for potential update
-    $violationRefNo = $_POST['violation_ref_no'] ?? null; 
-    $updatedByUserId = $loggedInUserId; // From the assumed logged-in user ID at the top
+            });
 
-    if (!$inspection_id || empty($inspection_items_data)) {
-        $response_data = ['success' => false, 'message' => 'بيانات غير كافية لحفظ بنود التفتيش.'];
-        break;
-    }
+            capturePhotoBtn.addEventListener('click', function() {
+                inspectionPhotoInput.click();
+            });
+            inspectionPhotoInput.addEventListener('change', async function(event) {
+                const file = event.target.files[0];
+                if (!file) return;
 
-    $current_facility_unique_id = null;
-    $stmt_facility = $conn->prepare("SELECT facility_unique_id FROM tbl_inspections WHERE inspection_id = ?");
-    if ($stmt_facility) {
-        $stmt_facility->bind_param("i", $inspection_id);
-        $stmt_facility->execute();
-        $result_facility = $stmt_facility->get_result();
-        $row_facility = $result_facility->fetch_assoc();
-        if ($row_facility) {
-            $current_facility_unique_id = $row_facility['facility_unique_id'];
-        }
-        $stmt_facility->close();
-    } else {
-        $response_data = ['success' => false, 'message' => 'خطأ في إعداد استعلام جلب معرف المنشأة: ' . $conn->error];
-        break;
-    }
-
-    $conn->begin_transaction();
-    $errors = [];
-    $successCount = 0;
-
-    // Delete existing items for this inspection to prevent duplicates on resubmission
-    $delete_stmt = $conn->prepare("DELETE FROM tbl_inspection_items WHERE inspection_id = ?");
-    if (!$delete_stmt) {
-        $errors[] = "خطأ في إعداد استعلام حذف البنود القديمة: " . $conn->error;
-        $conn->rollback();
-        $response_data = ['success' => false, 'message' => $errors[0]];
-        break;
-    }
-    $delete_stmt->bind_param("i", $inspection_id);
-    $delete_stmt->execute();
-    $delete_stmt->close();
-
-    foreach ($inspection_items_data as $item) {
-        $code_id = intval($item['code_id']);
-        $action_taken = $item['action_taken'] ?? null;
-        $condition_level = $item['condition_level'] ?? 'N/A';
-        $deducted_points = isset($item['deducted_points']) ? floatval($item['deducted_points']) : 0.00;
-        $immediate_correction = $item['immediate_correction'] ?? null;
-        $inspector_notes = $item['inspector_notes'] ?? null;
-        $violation_value = isset($item['violation_value']) ? floatval($item['violation_value']) : null; // Get violation_value
-
-        $is_violation = ($action_taken === 'مخالفة') ? 1 : 0;
-        $repeated_count = 0; 
-
-        // Only process items that have an action, or if it's a violation with 0 deducted points (e.g. for a warning)
-        if (empty($action_taken)) {
-            continue; 
-        }
-
-        if (!$code_id) { 
-            $errors[] = "بيانات البند ناقصة (كود).";
-            continue;
-        }
-
-        // Calculate repeated_count only if the current item is a violation
-        if ($is_violation === 1 && $current_facility_unique_id) {
-            $stmt_prev_inspections = $conn->prepare("
-                SELECT i.inspection_id
-                FROM tbl_inspections i
-                WHERE i.facility_unique_id = ? AND i.inspection_id != ?
-                ORDER BY i.inspection_date DESC, i.inspection_id DESC
-                LIMIT 3
-            ");
-            if ($stmt_prev_inspections) {
-                $stmt_prev_inspections->bind_param("si", $current_facility_unique_id, $inspection_id);
-                $stmt_prev_inspections->execute();
-                $result_prev_inspections = $stmt_prev_inspections->get_result();
-
-                $previous_inspection_ids = [];
-                while ($row_prev = $result_prev_inspections->fetch_assoc()) {
-                    $previous_inspection_ids[] = $row_prev['inspection_id'];
+                const codeId = this.dataset.codeId;
+                if (!currentInspectionId) {
+                    showMessage('الرجاء إنشاء التفتيش أولاً قبل التقاط الصور.', false);
+                    return;
                 }
-                $stmt_prev_inspections->close();
 
-                if (!empty($previous_inspection_ids)) {
-                    $placeholders = implode(',', array_fill(0, count($previous_inspection_ids), '?'));
-                    $types = str_repeat('i', count($previous_inspection_ids));
+                const fileName = `inspection_${currentInspectionId}_code_${codeId}_${Date.now()}.jpg`;
+                const uploadUrl = 'upload_inspection_image.php?action=upload_inspection_photo';
 
-                    $stmt_violation_count = $conn->prepare("
-                        SELECT COUNT(*) AS violation_count
-                        FROM tbl_inspection_items
-                        WHERE code_id = ? AND is_violation = 1 AND inspection_id IN ($placeholders)
-                    ");
-                    if ($stmt_violation_count) {
-                        $params_violation_count = array_merge([$types . 'i'], [$code_id], $previous_inspection_ids);
-                        $ref_params = [];
-                        foreach ($params_violation_count as $key => $value) {
-                            $ref_params[$key] = &$params_violation_count[$key];
+                try {
+                    const resizedImage = await resizeImage(file, 800, 600);
+                    const formData = new FormData();
+                    formData.append('file', resizedImage, fileName);
+                    formData.append('code_id', codeId);
+                    formData.append('inspection_id', currentInspectionId);
+                    const response = await fetch(uploadUrl, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        showMessage('تم رفع الصورة بنجاح!', true);
+                        photoPreviewContainer.innerHTML = `
+                            <img src="${result.file_path}" alt="Inspection Photo">
+                            <div class="photo-actions">
+                                <button type="button" class="btn-secondary view-photo-btn" data-photo-path="${result.file_path}">عرض</button>
+                                <button type="button" class="btn-danger delete-photo-btn" data-code-id="${codeId}">حذف</button>
+                            </div>
+                        `;
+                        photoPreviewContainer.dataset.imagePath = result.file_path;
+                        // Re-attach event listeners for newly created buttons
+                        photoPreviewContainer.querySelector('.view-photo-btn').addEventListener('click', function() {
+                            const photoPath = this.dataset.photoPath;
+                            window.open(photoPath, '_blank');
+                        });
+                        photoPreviewContainer.querySelector('.delete-photo-btn').addEventListener('click', async function() {
+                            const codeId = this.dataset.codeId;
+                            const photoPath = photoPreviewContainer.dataset.imagePath;
+
+                            if (confirm('هل أنت متأكد أنك تريد حذف هذه الصورة؟')) {
+                                try {
+                                    const formData = new FormData();
+                                    formData.append('action', 'delete_inspection_photo');
+                                    formData.append('photo_path', photoPath);
+                                    formData.append('code_id', codeId);
+                                    formData.append('inspection_id', currentInspectionId);
+
+                                    const response = await fetch('upload_inspection_image.php', {
+                                        method: 'POST',
+                                        body: formData
+                                    });
+                                    const data = await response.json();
+
+                                    if (data.success) {
+                                        showMessage('تم حذف الصورة بنجاح', true);
+                                        photoPreviewContainer.innerHTML = '';
+                                        photoPreviewContainer.dataset.imagePath = '';
+                                    } else {
+                                        showMessage('فشل حذف الصورة: ' + (data.message || 'خطأ غير معروف'), false);
+                                    }
+                                } catch (error) {
+                                    console.error('Error deleting photo:', error);
+                                    showMessage('حدث خطأ أثناء حذف الصورة', false);
+                                }
+                            }
+                        });
+                    } else {
+                        showMessage(`فشل رفع الصورة: ${result.message || 'خطأ غير معروف'}`, false);
+                    }
+                } catch (error) {
+                    console.error('Error uploading image:', error);
+                    showMessage('حدث خطأ أثناء رفع الصورة', false);
+                }
+            });
+            // Initial attachment of event listeners if photo already exists
+            if (viewPhotoBtn) {
+                viewPhotoBtn.addEventListener('click', function() {
+                    const photoPath = this.dataset.photoPath;
+                    window.open(photoPath, '_blank');
+                });
+            }
+            if (deletePhotoBtn) {
+                deletePhotoBtn.addEventListener('click', async function() {
+                    const codeId = this.dataset.codeId;
+                    const photoPath = photoPreviewContainer.dataset.imagePath; // Assuming dataset.imagePath is set correctly
+
+                    if (confirm('هل أنت متأكد أنك تريد حذف هذه الصورة؟')) {
+                        try {
+                            const formData = new FormData();
+                            formData.append('action', 'delete_inspection_photo');
+                            formData.append('photo_path', photoPath);
+                            formData.append('code_id', codeId);
+                            formData.append('inspection_id', currentInspectionId);
+
+                            const response = await fetch('upload_inspection_image.php', {
+                                method: 'POST',
+                                body: formData
+                            });
+                            const data = await response.json();
+
+                            if (data.success) {
+                                showMessage('تم حذف الصورة بنجاح', true);
+                                photoPreviewContainer.innerHTML = '';
+                                photoPreviewContainer.dataset.imagePath = '';
+                            } else {
+                                showMessage('فشل حذف الصورة: ' + (data.message || 'خطأ غير معروف'), false);
+                            }
+                        } catch (error) {
+                            console.error('Error deleting photo:', error);
+                            showMessage('حدث خطأ أثناء حذف الصورة', false);
                         }
-                        call_user_func_array([$stmt_violation_count, 'bind_param'], $ref_params);
-
-                        $stmt_violation_count->execute();
-                        $result_violation_count = $stmt_violation_count->get_result();
-                        $row_violation_count = $result_violation_count->fetch_assoc();
-                        $repeated_count = $row_violation_count['violation_count'] ?? 0;
-                        $stmt_violation_count->close();
-                    } else {
-                        error_log("Failed to prepare stmt_violation_count: " . $conn->error);
                     }
+                });
+            }
+        }
+    }
+    function resizeImage(file, maxWidth, maxHeight) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (event) => {
+                const img = new Image();
+                img.src = event.target.result;
+                img.onload = () => {
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > height) {
+                        if (width > maxWidth) {
+                            height *= maxWidth / width;
+                            width = maxWidth;
+                        }
+                    } else {
+                        if (height > maxHeight) {
+                            width *= maxHeight / height;
+                            height = maxHeight;
+                        }
+                        // This part seems to try to scale up smaller images,
+                        // but it might not be the desired behavior or might introduce blurriness.
+                        // Keeping it as per user provided code.
+                        if (width < maxWidth && height < maxHeight) {
+                            width = img.width;
+                            height = img.height;
+                        }
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    canvas.toBlob((blob) => {
+                        resolve(blob);
+                    }, 'image/jpeg', 0.8);
+                };
+            };
+        });
+    }
+    function calculatePoints(category, condition) {
+        const rules = {
+            'Critical': { 'Condition I': 0, 'Condition II': 175, 'Condition III': 250, 'Condition IV': 300, 'Condition V': 400 },
+            'Major': { 'Condition I': 0, 'Condition II': 120, 'Condition III': 150, 'Condition IV': 200, 'Condition V': 250 },
+            'General': { 'Condition I': 0, 'Condition II': 50, 'Condition III': 75, 'Condition IV': 100, 'Condition V': 150 },
+            'Administrative': { 'Condition I': 0, 'Condition II': 0, 'Condition III': 0, 'Condition IV': 0, 'Condition V': 0 }
+        };
+
+        return rules[category]?.[condition] || 0;
+    }
+
+    saveItemsBtn.addEventListener('click', async function() {
+        if (!currentInspectionId) {
+            showMessage('لم يتم إنشاء التفتيش بعد', false);
+            return;
+        }
+
+        const itemsToSave = [];
+        const itemRows = document.querySelectorAll('.item-row');
+
+        itemRows.forEach(row => {
+            const codeId = row.querySelector('.is-violation-checkbox').dataset.codeId;
+            const isViolationCheckbox = row.querySelector('.is-violation-checkbox');
+            const isViolation = isViolationCheckbox.checked;
+
+            let actionTaken = 'لا يوجد إجراء';
+            let conditionLevel = 'N/A';
+            let deductedPoints = 0.00;
+            let violationValue = null;
+            let inspectorNotes = '';
+            let inspectionPhotoPath = '';
+
+            if (isViolation) {
+                const actionSelect = row.querySelector('.action-select');
+                actionTaken = actionSelect.value || 'غير محدد';
+
+                const pointsInput = row.querySelector('.points-input');
+                deductedPoints = parseFloat(pointsInput.value) || 0.00;
+                conditionLevel = pointsInput.dataset.conditionLevel || 'N/A';
+
+                const violationValueInput = row.querySelector('.violation-value-input');
+                violationValue = (actionTaken === 'مخالفة' && violationValueInput) ? parseFloat(violationValueInput.value) : null;
+
+                const notesInput = row.querySelector('.notes-input');
+                inspectorNotes = notesInput.value || '';
+
+                const photoPreviewContainer = row.querySelector('.photo-preview-container');
+                inspectionPhotoPath = photoPreviewContainer.dataset.imagePath || '';
+            }
+
+            if (isViolation && actionTaken !== 'لا يوجد إجراء') {
+                itemsToSave.push({
+                    code_id: codeId,
+                    is_violation: 1,
+                    action_taken: actionTaken,
+                    condition_level: conditionLevel,
+                    deducted_points: deductedPoints,
+                    violation_value: violationValue,
+                    inspector_notes: inspectorNotes,
+                    inspection_photo_path: inspectionPhotoPath
+                });
+            }
+        });
+
+        const generalNotes = notesTextarea.value;
+        const inspectionType = inspectionTypeSelect.value;
+        const campaignName = campaignNameInput.value;
+        const inspectorId = inspectorIdInput.value;
+        const violationRefNo = violationRefNoInput.value;
+
+        try {
+            const formData = new FormData();
+            formData.append('action', 'save_inspection_items');
+            formData.append('inspection_id', currentInspectionId);
+            formData.append('items_data', JSON.stringify(itemsToSave));
+            formData.append('notes', generalNotes);
+            formData.append('inspection_type', inspectionType);
+            formData.append('campaign_name', campaignName);
+            formData.append('inspector_user_id', inspectorId);
+            formData.append('violation_ref_no', violationRefNo);
+            formData.append('updated_by_user_id', loggedInUserId);
+
+            const response = await fetch('api.php', {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                resultDeducted.textContent = parseFloat(data.results.total_deducted_points || 0).toFixed(2);
+                resultScore.textContent = parseFloat(data.results.final_inspection_score || 0).toFixed(2);
+                resultPercentage.textContent = parseFloat(data.results.percentage_score || 0).toFixed(2) + '%';
+                resultGrade.textContent = data.results.letter_grade;
+                resultCard.textContent = data.results.color_card;
+                resultCritical.textContent = data.results.critical_violations || 0;
+                resultMajor.textContent = data.results.major_violations || 0;
+                resultGeneral.textContent = data.results.general_violations || 0;
+                resultAdministrative.textContent = data.results.administrative_violations || 0;
+                resultNextDate.textContent = data.results.next_inspection_date || 'غير محدد';
+                violationRefNoInput.value = data.results.violation_ref_no || '';
+                totalViolationValueInput.value = parseFloat(data.results.total_violation_value || 0).toFixed(2);
+                approvalStatusInput.value = data.results.approval_status || 'Pending';
+                approvedByInput.value = data.results.approved_by_username || '';
+                approvalDateInput.value = data.results.approval_date || '';
+                updatedByInput.value = data.results.updated_by_username || loggedInUserName;
+                resultNotes.value = generalNotes;
+
+                if (parseFloat(data.results.total_violation_value || 0) > 5000) {
+                    totalViolationValueInput.classList.add('high-violation');
+                } else {
+                    totalViolationValueInput.classList.remove('high-violation');
                 }
+
+                itemsSection.style.display = 'none';
+                resultsSection.style.display = 'block';
+
+                showMessage('تم حفظ البنود وتحديث التفتيش بنجاح', true);
+                approveInspectionBtn.disabled = false;
+                editInspectionBtn.disabled = false;
             } else {
-                error_log("Failed to prepare stmt_prev_inspections: " . $conn->error);
+                showMessage(data.message || 'فشل حفظ البنود', false);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            showMessage('حدث خطأ أثناء حفظ البنود', false);
+        }
+    });
+
+    approveInspectionBtn.addEventListener('click', async function() {
+        if (!currentInspectionId) {
+            showMessage('لا يوجد تفتيش لاعتماده.', false);
+            return;
+        }
+
+        if (confirm('هل أنت متأكد أنك تريد اعتماد هذا التفتيش؟')) {
+            try {
+                const formData = new FormData();
+                formData.append('action', 'approve_inspection');
+                formData.append('inspection_id', currentInspectionId);
+                formData.append('approved_by_user_id', loggedInUserId);
+
+                const response = await fetch('api.php', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    approvalStatusInput.value = data.approval_status || 'Approved';
+                    approvedByInput.value = data.approved_by_username || loggedInUserName;
+                    approvalDateInput.value = data.approval_date || new Date().toISOString().slice(0,10);
+                    updatedByInput.value = data.updated_by_username || loggedInUserName;
+
+                    showMessage('تم اعتماد التفتيش بنجاح!', true);
+                } else {
+                    showMessage(data.message || 'فشل اعتماد التفتيش.', false);
+                }
+            } catch (error) {
+                console.error('Error approving inspection:', error);
+                showMessage('حدث خطأ أثناء اعتماد التفتيش.', false);
             }
         }
+    });
 
-        $stmt = $conn->prepare("
-            INSERT INTO tbl_inspection_items
-                (inspection_id, code_id, is_violation, action_taken, condition_level, 
-                 deducted_points, immediate_correction, inspector_notes, repeated_count, violation_value)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ");
-        $stmt->bind_param(
-            "iiissdssid",
-            $inspection_id,
-            $code_id,
-            $is_violation,
-            $action_taken,
-            $condition_level,
-            $deducted_points,
-            $immediate_correction,
-            $inspector_notes,
-            $repeated_count,
-            $violation_value
-        );
-
-        if ($stmt->execute()) {
-            $successCount++;
-        } else {
-            $errors[] = "فشل حفظ البند رقم $code_id: " . $stmt->error;
+    editInspectionBtn.addEventListener('click', function() {
+        if (!currentInspectionId) {
+            showMessage('لا يوجد تفتيش لتعديله.', false);
+            return;
         }
-        $stmt->close();
-    }
 
-    if (empty($errors)) {
-        // Update violation_ref_no in tbl_inspections if provided
-        if ($violationRefNo !== null && $inspection_id !== null) {
-            $stmt_update_insp = $conn->prepare("UPDATE tbl_inspections SET violation_ref_no = ?, updated_by_user_id = ? WHERE inspection_id = ?");
-            if ($stmt_update_insp) {
-                $stmt_update_insp->bind_param("sii", $violationRefNo, $updatedByUserId, $inspection_id);
-                $stmt_update_insp->execute();
-                $stmt_update_insp->close();
-            } else {
-                error_log("Error preparing update violation_ref_no statement: " . $conn->error);
+        resultsSection.style.display = 'none';
+        inspectionSection.style.display = 'block';
+        itemsSection.style.display = 'block';
+        showMessage('أصبح النموذج قابلاً للتعديل الآن.', true);
+    });
+
+    newInspectionBtn.addEventListener('click', resetFormVisibility);
+    newInspectionBtnResults.addEventListener('click', resetFormVisibility);
+
+    async function handleDeleteInspection() {
+        if (!currentInspectionId) {
+            showMessage('لا يوجد نموذج تفتيش لحذفه.', false);
+            return;
+        }
+
+        if (confirm('هل أنت متأكد أنك تريد حذف نموذج التفتيش هذا؟ سيؤدي هذا إلى حذف جميع البيانات المتعلقة بهذا التفتيش.')) {
+            try {
+                const formData = new FormData();
+                formData.append('action', 'delete_inspection');
+                formData.append('inspection_id', currentInspectionId);
+
+                const response = await fetch('api.php', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showMessage('تم حذف النموذج بنجاح.', true);
+                    resetFormVisibility();
+                } else {
+                    showMessage(data.message || 'فشل حذف النموذج.', false);
+                }
+            } catch (error) {
+                console.error('Error deleting inspection:', error);
+                showMessage('حدث خطأ أثناء حذف النموذج.', false);
             }
-        } else {
-             // If no violationRefNo but there's an update, just update updated_by_user_id
-             $stmt_update_insp = $conn->prepare("UPDATE tbl_inspections SET updated_by_user_id = ? WHERE inspection_id = ?");
-             if ($stmt_update_insp) {
-                 $stmt_update_insp->bind_param("ii", $updatedByUserId, $inspection_id);
-                 $stmt_update_insp->execute();
-                 $stmt_update_insp->close();
-             } else {
-                 error_log("Error preparing update updated_by_user_id statement: " . $conn->error);
-             }
+        }
+    }
+
+    deleteInspectionBtn.addEventListener('click', handleDeleteInspection);
+    deleteInspectionBtnResults.addEventListener('click', handleDeleteInspection);
+
+    printReportBtn.addEventListener('click', function() {
+        if (!currentInspectionId) {
+            showMessage('لا يوجد تفتيش لطباعة تقرير له.', false);
+            return;
         }
 
-        $conn->commit();
-        $results = calculateInspectionResults($inspection_id, $conn, $updatedByUserId); // Pass updated_by_user_id
-        $response_data = ['success' => true, 'saved' => $successCount, 'results' => $results, 'message' => 'تم حفظ بنود التفتيش وحساب النتائج بنجاح.'];
-    } else {
-        $conn->rollback();
-        $response_data = ['success' => false, 'saved' => $successCount, 'errors' => $errors, 'message' => 'حدثت أخطاء أثناء حفظ بنود التفتيش.'];
+        window.open(`generate_report.php?inspection_id=${currentInspectionId}`, '_blank');
+    });
+
+    emailReportBtn.addEventListener('click', async function() {
+        if (!currentInspectionId) {
+            showMessage('لا يوجد تفتيش لإرسال تقرير له.', false);
+            return;
+        }
+
+        const recipientEmail = establishmentEmailInput.value || '';
+        if (!recipientEmail) {
+            showMessage('لا يوجد بريد إلكتروني مسجل للمنشأة.', false);
+            return;
+        }
+
+        if (confirm(`هل تريد إرسال التقرير إلى ${recipientEmail}؟`)) {
+            try {
+                const formData = new FormData();
+                formData.append('action', 'email_report');
+                formData.append('inspection_id', currentInspectionId);
+                formData.append('recipient_email', recipientEmail);
+
+                showMessage('جارٍ إرسال التقرير...', true);
+
+                const response = await fetch('api.php', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showMessage('تم إرسال التقرير بنجاح!', true);
+                } else {
+                    showMessage(`فشل إرسال التقرير: ${data.message || 'خطأ غير معروف'}`, false);
+                }
+            } catch (error) {
+                console.error('Error emailing report:', error);
+                showMessage('حدث خطأ أثناء إرسال التقرير.', false);
+            }
+        }
+    });
+
+    // Action Management Event Listeners
+    addActionBtn.addEventListener('click', function() {
+        openActionModal();
+    });
+
+    saveActionBtn.addEventListener('click', saveAction);
+    deleteActionBtn.addEventListener('click', deleteAction);
+    cancelActionBtn.addEventListener('click', closeActionModal);
+    closeModal.addEventListener('click', closeActionModal);
+
+    // Initialize the form
+    resetFormVisibility();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialUniqueId = urlParams.get('unique_id');
+    const initialInspectionId = urlParams.get('inspection_id');
+
+    if (initialInspectionId) {
+        displayInspection(initialInspectionId);
+    } else if (initialUniqueId) {
+        licenseNoInput.value = initialUniqueId;
+        searchAndLoadInspection(initialUniqueId);
     }
-    break;
-
-
-        default:
-            $response_data = ['success' => false, 'message' => 'إجراء غير صالح.'];
-            break;
-    }
-} else {
-    $response_data = ['success' => false, 'message' => 'طريقة طلب غير صالحة.'];
-}
-
-$output_buffer_content = ob_get_clean();
-
-if (!empty($output_buffer_content)) {
-    $response_data['debug_output'] = $output_buffer_content;
-    $response_data['message'] = 'An internal server error occurred. Debug info in debug_output.';
-}
-
-echo json_encode($response_data);
-?>
+});
+</script>
+</body>
+</html>
