@@ -1,2144 +1,1005 @@
 <?php
+// Display and security settings
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 session_start();
-require_once 'auth.php';
-if (!isset($_SESSION['user']) || !is_array($_SESSION['user']) || empty($_SESSION['user']['EmpName'])) {
-    header("Location: login.php");
-    exit;
+
+// استدعاء ملفات الاتصال بقاعدة البيانات والترجمات
+require_once __DIR__ . '/product_details_translations.php';
+require_once __DIR__ . '/../database/db.php';
+$conn = connectDB();
+
+if ($conn === null) {
+    die("خطأ في الاتصال بقاعدة البيانات. يرجى مراجعة ملف db.php.");
 }
-$user = $_SESSION['user'];
-$loggedInUserId = $user['EmpID'] ?? '';
-$loggedInUserName = $user['EmpName'] ?? '';
+
+// Language and direction setup
+$available_langs = ['ar', 'en', 'hi', 'ur'];
+if (isset($_GET['lang']) && in_array($_GET['lang'], $available_langs)) {
+    $_SESSION['lang'] = $_GET['lang'];
+} elseif (!isset($_SESSION['lang'])) {
+    $_SESSION['lang'] = 'ar';
+}
+$lang = $_SESSION['lang'];
+$dir = ($lang === 'ar' || $lang === 'ur') ? 'rtl' : 'ltr';
+
+// Ensure $t is always an array, with 'en' as a fallback
+if (isset($translations[$lang])) {
+    $t = $translations[$lang];
+} elseif (isset($translations['en'])) {
+    $t = $translations['en'];
+} else {
+    $t = [];
+}
+
+// Set dynamic profile link
+$profile_link = '';
+if (isset($_SESSION['user_id'])) {
+    if ($_SESSION['role'] === 'customer') {
+        $profile_link = 'https://mzmz.wuaze.com/platform/admin/edit_client.php';
+    } elseif ($_SESSION['role'] === 'vendor') {
+        $profile_link = 'https://mzmz.wuaze.com/platform/vendor/vendor_dashboard.php';
+    } elseif ($_SESSION['role'] === 'third_party_service') {
+        $profile_link = 'https://mzmz.wuaze.com/platform/admin/edit_third_party.php';
+    }
+}
+
+// Helper functions
+function getVendorTransparencyAndGrade($complaint_count, $average_rating, $lang) {
+    global $t;
+    $complaint_count = (int)$complaint_count;
+    $average_rating = (float)$average_rating;
+    $grade = '';
+    $color = '';
+    $description = '';
+
+    if ($complaint_count == 0) {
+        if ($average_rating >= 4.5) {
+            $grade = $t['grade_a_plus'] ?? 'A+';
+            $description = $t['grade_excellent'] ?? 'Excellent';
+            $color = 'bg-green-600 text-white';
+        } elseif ($average_rating >= 3.5) {
+            $grade = $t['grade_a'] ?? 'A';
+            $description = $t['grade_very_good'] ?? 'Very Good';
+            $color = 'bg-green-500 text-white';
+        } else {
+            $grade = $t['grade_b'] ?? 'B';
+            $description = $t['grade_good'] ?? 'Good';
+            $color = 'bg-yellow-500 text-white';
+        }
+    } elseif ($complaint_count <= 2) {
+        if ($average_rating >= 4.0) {
+            $grade = $t['grade_a'] ?? 'A';
+            $description = $t['grade_very_good'] ?? 'Very Good';
+            $color = 'bg-green-500 text-white';
+        } elseif ($average_rating >= 2.5) {
+            $grade = $t['grade_b'] ?? 'B';
+            $description = $t['grade_good'] ?? 'Good';
+            $color = 'bg-yellow-500 text-white';
+        } else {
+            $grade = $t['grade_c'] ?? 'C';
+            $description = $t['grade_fair'] ?? 'Fair';
+            $color = 'bg-orange-500 text-white';
+        }
+    } elseif ($complaint_count <= 5) {
+        if ($average_rating >= 3.0) {
+            $grade = $t['grade_b'] ?? 'B';
+            $description = $t['grade_good'] ?? 'Good';
+            $color = 'bg-yellow-500 text-white';
+        } else {
+            $grade = $t['grade_c'] ?? 'C';
+            $description = $t['grade_fair'] ?? 'Fair';
+            $color = 'bg-orange-500 text-white';
+        }
+    } elseif ($complaint_count <= 10) {
+        $grade = $t['grade_d'] ?? 'D';
+        $description = $t['grade_poor'] ?? 'Poor';
+        $color = 'bg-red-500 text-white';
+    } else { // complaint_count > 10
+        $grade = $t['grade_e'] ?? 'E';
+        $description = $t['grade_very_poor'] ?? 'Very Poor';
+        $color = 'bg-red-800 text-white';
+    }
+    return ['grade' => $grade, 'description' => $description, 'color' => $color];
+}
+
+// --------------------------------------------------------
+// Fetch product details
+// --------------------------------------------------------
+$product_id = $_GET['id'] ?? null;
+if (!$product_id) {
+    die("خطأ: لم يتم تحديد معرف المنتج.");
+}
+
+$sql_product = "
+    SELECT
+        p.id, p.product_name, p.price, p.original_price, p.discount_price, p.unit, p.brand, p.description, p.shipping_type, p.tax_rate, p.quantity,
+        v.id AS vendor_id, v.vendor_name,
+        COALESCE(SUM(oi.quantity), 0) AS total_sales,
+        (SELECT COUNT(*) FROM complaints WHERE complaint_against_vendor_id = v.id) AS vendor_complaint_count,
+        COALESCE(AVG(vr.rating), 0) AS average_rating,
+        COUNT(DISTINCT vr.id) AS total_ratings
+    FROM products p
+    JOIN vendors v ON p.vendor_id = v.id
+    LEFT JOIN order_items oi ON p.id = oi.product_id
+    LEFT JOIN vendor_reviews vr ON p.id = vr.product_id
+    WHERE p.id = ?
+    GROUP BY p.id
+";
+
+$stmt_product = $conn->prepare($sql_product);
+if (!$stmt_product) {
+    die("خطأ في تهيئة الاستعلام: " . $conn->error);
+}
+$stmt_product->bind_param("i", $product_id);
+$stmt_product->execute();
+$result_product = $stmt_product->get_result();
+$product = $result_product->fetch_assoc();
+$stmt_product->close();
+
+if (!$product) {
+    die("خطأ: المنتج غير موجود.");
+}
+
+// Check for valid discount and calculate percentage
+$original_price = (float) $product['original_price'];
+$discount_price = (float) $product['discount_price'];
+$tax_rate = (float) ($product['tax_rate'] ?? 0);
+$discount_percentage = 0;
+if ($original_price > 0 && $discount_price > 0 && $discount_price < $original_price) {
+    $discount_percentage = round((($original_price - $discount_price) / $original_price) * 100);
+}
+
+$base_price = $discount_price > 0 ? $discount_price : $original_price;
+
+// --------------------------------------------------------
+// Fetch product quantity (New Logic)
+// --------------------------------------------------------
+$total_quantity = 0;
+$has_skus = false;
+
+// Check if the product has SKUs
+$sql_check_skus = "SELECT COUNT(*) as count FROM product_skus WHERE product_id = ?";
+$stmt_check_skus = $conn->prepare($sql_check_skus);
+if ($stmt_check_skus) {
+    $stmt_check_skus->bind_param("i", $product_id);
+    $stmt_check_skus->execute();
+    $result_check_skus = $stmt_check_skus->get_result();
+    $row_skus = $result_check_skus->fetch_assoc();
+    $has_skus = ($row_skus['count'] > 0);
+    $stmt_check_skus->close();
+}
+
+if ($has_skus) {
+    // If there are SKUs, sum their quantities
+    $sql_total_quantity = "
+        SELECT COALESCE(SUM(quantity), 0) as total_quantity
+        FROM product_skus
+        WHERE product_id = ?
+    ";
+    $stmt_total_quantity = $conn->prepare($sql_total_quantity);
+    if ($stmt_total_quantity) {
+        $stmt_total_quantity->bind_param("i", $product_id);
+        $stmt_total_quantity->execute();
+        $result_total_quantity = $stmt_total_quantity->get_result();
+        $row = $result_total_quantity->fetch_assoc();
+        $total_quantity = (int) $row['total_quantity'];
+        $stmt_total_quantity->close();
+    }
+} else {
+    // If no SKUs, use the quantity from the main products table
+    $total_quantity = (int) ($product['quantity'] ?? 0);
+}
+
+// --------------------------------------------------------
+// Fetch product images
+// --------------------------------------------------------
+$all_images = ['https://mzmz.wuaze.com/platform/assets/placeholder.jpg'];
+$sql_images = "SELECT image_url FROM product_images WHERE product_id = ? ORDER BY id ASC";
+$stmt_images = $conn->prepare($sql_images);
+if ($stmt_images) {
+    $stmt_images->bind_param("i", $product_id);
+    $stmt_images->execute();
+    $result_images = $stmt_images->get_result();
+    $fetched_images = [];
+    while ($image_row = $result_images->fetch_assoc()) {
+        $image_url = $image_row['image_url'];
+        // Ensure path is correct, trim leading slashes if they exist
+        $image_url = ltrim($image_url, '/');
+        $fetched_images[] = 'https://mzmz.wuaze.com/platform/' . $image_url;
+    }
+    if (!empty($fetched_images)) {
+        $all_images = $fetched_images;
+    }
+    $stmt_images->close();
+}
+
+// --------------------------------------------------------
+// Fetch product properties and SKUs (Variants)
+// --------------------------------------------------------
+$product_properties = [];
+$sql_props_all = "
+    SELECT 
+        pn.id AS name_id, 
+        pn.name_$lang AS property_name, 
+        GROUP_CONCAT(
+            CONCAT(
+                pv.id, ':', pv.value_$lang
+            ) SEPARATOR '|'
+        ) AS values_data
+    FROM product_properties pp
+    JOIN property_names pn ON pp.property_name_id = pn.id
+    JOIN property_values pv ON pp.property_value_id = pv.id
+    WHERE pp.product_id = ?
+    GROUP BY pn.id, pn.name_$lang
+";
+$stmt_props_all = $conn->prepare($sql_props_all);
+if ($stmt_props_all) {
+    $stmt_props_all->bind_param("i", $product_id);
+    $stmt_props_all->execute();
+    $result_props_all = $stmt_props_all->get_result();
+    while ($prop_row = $result_props_all->fetch_assoc()) {
+        $prop_values = [];
+        $values = explode('|', $prop_row['values_data']);
+        foreach ($values as $value) {
+            list($id, $val) = explode(':', $value);
+            $prop_values[] = [
+                'id' => (int)$id, // Ensure ID is an integer
+                'value' => $val,
+            ];
+        }
+        $product_properties[] = [
+            'name_id' => $prop_row['name_id'],
+            'name' => $prop_row['property_name'],
+            'values' => $prop_values,
+        ];
+    }
+    $stmt_props_all->close();
+}
+
+// Fetch all SKUs data for this product
+$skus_data = [];
+if ($has_skus) {
+    $sql_skus = "
+        SELECT 
+            ps.id, ps.price_modifier, ps.quantity, 
+            GROUP_CONCAT(sp.property_value_id ORDER BY sp.property_value_id) AS property_value_ids_string
+        FROM product_skus ps
+        JOIN sku_properties sp ON ps.id = sp.sku_id
+        WHERE ps.product_id = ?
+        GROUP BY ps.id
+    ";
+    $stmt_skus = $conn->prepare($sql_skus);
+    if ($stmt_skus) {
+        $stmt_skus->bind_param("i", $product_id);
+        $stmt_skus->execute();
+        $result_skus = $stmt_skus->get_result();
+        while ($sku_row = $result_skus->fetch_assoc()) {
+            $skus_data[] = [
+                'price_modifier' => (float)$sku_row['price_modifier'],
+                'quantity' => (int)$sku_row['quantity'],
+                // Convert comma-separated string to a sorted array
+                'property_value_ids' => array_map('intval', explode(',', $sku_row['property_value_ids_string']))
+            ];
+        }
+        $stmt_skus->close();
+    }
+}
+
+// --------------------------------------------------------
+// Fetch Vendor Shipping (Corrected query)
+// --------------------------------------------------------
+$shipping_status = $t['shipping_not_available'] ?? 'Shipping information not available.';
+$sql_shipping = "
+    SELECT
+        vs.price,
+        vs.free_shipping_threshold,
+        ct.name AS city_name
+    FROM vendor_shipping vs
+    JOIN cities c ON vs.city_id = c.id
+    JOIN city_translations ct ON c.id = ct.city_id
+    WHERE vs.vendor_id = ? AND vs.is_active = 1 AND ct.language_code = ?
+";
+$stmt_shipping = $conn->prepare($sql_shipping);
+if ($stmt_shipping) {
+    $stmt_shipping->bind_param("is", $product['vendor_id'], $lang);
+    $stmt_shipping->execute();
+    $result_shipping = $stmt_shipping->get_result();
+
+    $shipping_info = [];
+    while ($row = $result_shipping->fetch_assoc()) {
+        $shipping_info[] = $row;
+    }
+    $stmt_shipping->close();
+
+    if (!empty($shipping_info)) {
+        $free_shipping_cities = [];
+        $paid_shipping_cities = [];
+
+        foreach ($shipping_info as $info) {
+            $cityName = htmlspecialchars($info['city_name'] ?? '');
+            $isFree = ($base_price >= $info['free_shipping_threshold']);
+
+            if ($isFree) {
+                $free_shipping_cities[] = $cityName;
+            } else {
+                $paid_shipping_cities[] = ['city' => $cityName, 'price' => $info['price']];
+            }
+        }
+
+        $shipping_lines = [];
+        if (!empty($free_shipping_cities)) {
+            $shipping_lines[] = htmlspecialchars($t['free_shipping_to'] ?? 'Free Shipping to') . ': ' . implode(', ', $free_shipping_cities);
+        }
+        if (!empty($paid_shipping_cities)) {
+            foreach ($paid_shipping_cities as $paid_city) {
+                $shipping_lines[] = htmlspecialchars($t['shipping_to'] ?? 'Shipping to') . ' ' . $paid_city['city'] . ': ' . number_format($paid_city['price'], 2) . ' ' . htmlspecialchars($t['currency'] ?? 'AED');
+            }
+        }
+        $shipping_status = implode('<br>', $shipping_lines);
+    }
+}
+
+// --------------------------------------------------------
+// Fetch active product offers (New)
+// --------------------------------------------------------
+$offers = [];
+$sql_offers = "
+    SELECT offer_type, offer_value, buy_quantity, get_quantity
+    FROM product_offers
+    WHERE product_id = ? AND is_active = 1 AND end_date > NOW()
+";
+$stmt_offers = $conn->prepare($sql_offers);
+if ($stmt_offers) {
+    $stmt_offers->bind_param("i", $product_id);
+    $stmt_offers->execute();
+    $result_offers = $stmt_offers->get_result();
+    while ($row = $result_offers->fetch_assoc()) {
+        $offers[] = $row;
+    }
+    $stmt_offers->close();
+}
+
+
+// --------------------------------------------------------
+// Fetch Product Analytics
+// --------------------------------------------------------
+$product_analytics = ['total_views' => 0, 'total_clicks' => 0, 'total_wishlists' => 0];
+$sql_analytics = "
+    SELECT
+        COALESCE(SUM(viewed), 0) AS total_views,
+        COALESCE(SUM(clicked), 0) AS total_clicks,
+        COALESCE(SUM(wishlisted), 0) AS total_wishlists
+    FROM product_analytics
+    WHERE product_id = ?
+";
+$stmt_analytics = $conn->prepare($sql_analytics);
+if ($stmt_analytics) {
+    $stmt_analytics->bind_param("i", $product_id);
+    $stmt_analytics->execute();
+    $result_analytics = $stmt_analytics->get_result();
+    if ($result_analytics->num_rows > 0) {
+        $product_analytics = $result_analytics->fetch_assoc();
+    }
+    $stmt_analytics->close();
+}
+
+// --------------------------------------------------------
+// Fetch complaints against the product/vendor
+// --------------------------------------------------------
+$product_complaints = [];
+$sql_complaints = "
+    SELECT c.complaint_by_user_id, c.complaint_text, c.complaint_status, c.complaint_date, u.username AS user_name
+    FROM complaints c
+    JOIN users u ON c.complaint_by_user_id = u.id
+    WHERE c.complaint_against_vendor_id = ? AND c.order_id IN (
+        SELECT order_id FROM order_items WHERE product_id = ?
+    )
+";
+$stmt_complaints = $conn->prepare($sql_complaints);
+if ($stmt_complaints) {
+    $stmt_complaints->bind_param("ii", $product['vendor_id'], $product_id);
+    $stmt_complaints->execute();
+    $result_complaints = $stmt_complaints->get_result();
+    while ($row = $result_complaints->fetch_assoc()) {
+        $product_complaints[] = $row;
+    }
+    $stmt_complaints->close();
+}
+
+// --------------------------------------------------------
+// Fetch Star Rating Counts and comments from vendor_reviews
+// --------------------------------------------------------
+$star_ratings = [5 => 0, 4 => 0, 3 => 0, 2 => 0, 1 => 0];
+$reviews_by_star = [5 => [], 4 => [], 3 => [], 2 => [], 1 => []];
+$sql_reviews = "
+    SELECT vr.id, vr.rating, vr.comment, u.username AS user_name, vr.review_date
+    FROM vendor_reviews vr
+    JOIN users u ON vr.user_id = u.id
+    WHERE vr.product_id = ?
+    ORDER BY vr.rating DESC, vr.review_date DESC
+";
+$stmt_reviews = $conn->prepare($sql_reviews);
+if ($stmt_reviews) {
+    $stmt_reviews->bind_param("i", $product_id);
+    $stmt_reviews->execute();
+    $result_reviews = $stmt_reviews->get_result();
+    while ($row = $result_reviews->fetch_assoc()) {
+        $rating = (int)$row['rating'];
+        if (isset($reviews_by_star[$rating])) {
+            $reviews_by_star[$rating][] = $row;
+            $star_ratings[$rating]++;
+        }
+    }
+    $stmt_reviews->close();
+}
+
+$conn->close();
+
+$vendor_transparency = getVendorTransparencyAndGrade($product['vendor_complaint_count'] ?? 0, $product['average_rating'] ?? 0, $lang);
+
 ?>
+
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="<?= htmlspecialchars($lang); ?>" dir="<?= htmlspecialchars($dir); ?>">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>نموذج التفتيش الموحد</title>
-<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
-<style>
-    :root {
-        --primary-color: #28a745;
-        --secondary-bg: #e8f5e9;
-        --card-bg: #ffffff;
-        --text-color: #333;
-        --border-color: #ddd;
-        --focus-color: #1a7a3b;
-        --shadow-light: rgba(0, 0, 0, 0.08);
-        --danger-color: #dc3545;
-    }
-    body {
-        font-family: 'Cairo', sans-serif;
-        margin: 0;
-        padding: 0;
-        background-color: var(--secondary-bg);
-        color: var(--text-color);
-        direction: rtl;
-    }
-    .container {
-        max-width: 900px;
-        margin: 20px auto;
-        padding: 20px;
-        background-color: var(--card-bg);
-        border-radius: 8px;
-        box-shadow: 0 4px 10px var(--shadow-light);
-    }
-    .header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding-bottom: 15px;
-        margin-bottom: 20px;
-        border-bottom: 2px solid var(--primary-color);
-    }
-    .header img {
-        height: 60px;
-    }
-    .header-text {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        color: #1a7a3b;
-        font-weight: bold;
-    }
-    .header-text .main-title {
-        font-size: 1.2em;
-        margin-bottom: 2px;
-    }
-    .header-text .sub-title {
-        font-size: 0.9em;
-        color: #4CAF50;
-    }
-    h1 {
-        text-align: center;
-        color: var(--primary-color);
-        margin-bottom: 30px;
-        font-size: 2em;
-    }
-    .form-section {
-        background-color: var(--card-bg);
-        padding: 20px;
-        margin-bottom: 20px;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px var(--shadow-light);
-        border: 1px solid var(--border-color);
-    }
-    .form-section h3 {
-        color: var(--primary-color);
-        border-bottom: 1px solid var(--border-color);
-        padding-bottom: 10px;
-        margin-bottom: 15px;
-        font-size: 1.3em;
-    }
-    .form-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-        gap: 15px;
-        margin-bottom: 20px;
-    }
-    .form-group {
-        margin-bottom: 15px;
-    }
-    label {
-        margin-bottom: 5px;
-        display: block;
-        font-weight: bold;
-        color: #555;
-    }
-    input, select, textarea {
-        width: 100%;
-        padding: 10px;
-        margin-bottom: 5px;
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
-        box-sizing: border-box;
-        font-family: 'Cairo', sans-serif;
-    }
-    input[type="date"] {
-        direction: rtl;
-    }
-    input:focus, select:focus, textarea:focus {
-        border-color: var(--focus-color);
-        outline: none;
-        box-shadow: 0 0 0 2px rgba(40, 167, 69, 0.2);
-    }
-    .readonly {
-        background-color: #f5f5f5;
-        cursor: not-allowed;
-    }
-    #message {
-        margin-bottom: 20px;
-        padding: 10px;
-        border-radius: 5px;
-        text-align: center;
-        display: none;
-    }
-    .success {
-        background-color: #e8f5e9;
-        border: 1px solid var(--primary-color);
-        color: var(--focus-color);
-    }
-    .error {
-        background-color: #ffe6e6;
-        border: 1px solid var(--danger-color);
-        color: #c82333;
-    }
-    .search-area {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 20px;
-    }
-    .search-area input {
-        flex-grow: 1;
-    }
-    button {
-        padding: 10px 20px;
-        background-color: var(--primary-color);
-        color: white;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        font-size: 1em;
-        display: flex;
-        align-items: center;
-        transition: all 0.2s;
-    }
-    button:hover {
-        background-color: var(--focus-color);
-        transform: translateY(-2px);
-    }
-    button i {
-        margin-left: 8px;
-    }
-    .search-btn {
-        background-color: #ffc107;
-        color: #333;
-    }
-    .search-btn:hover {
-        background-color: #e0a800;
-    }
-    .btn-secondary {
-        background-color: #6c757d;
-        color: white;
-    }
-    .btn-secondary:hover {
-        background-color: #5a6268;
-    }
-    .btn-danger {
-        background-color: var(--danger-color);
-        color: white;
-    }
-    .btn-danger:hover {
-        background-color: #c82333;
-    }
-    .item-row {
-        border: 1px solid #eee;
-        padding: 15px;
-        margin-bottom: 15px;
-        border-radius: 5px;
-        background-color: #f9f9f9;
-    }
-    .item-row p {
-        margin: 0 0 10px 0;
-    }
-    .violation-details {
-        margin-top: 15px;
-        padding-top: 15px;
-        border-top: 1px dashed #ccc;
-    }
-    .results-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-        gap: 15px;
-        margin: 20px 0;
-    }
-    .result-item {
-        padding: 10px;
-        background-color: #f8f9fa;
-        border-radius: 5px;
-    }
-    .result-item strong {
-        display: block;
-        margin-bottom: 5px;
-        color: var(--primary-color);
-    }
-    .previous-violation-indicator {
-        background-color: #ffe0b2;
-        color: #e65100;
-        padding: 5px 10px;
-        border-radius: 5px;
-        font-size: 0.8em;
-        font-weight: bold;
-        margin-right: 10px;
-        display: inline-block;
-        float: left;
-    }
-    .item-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 10px;
-    }
-    .item-header p {
-        margin: 0;
-        flex-grow: 1;
-    }
-    .violation-toggle-group {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        white-space: nowrap;
-    }
-    .button-group {
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
-        margin-top: 20px;
-        justify-content: flex-end;
-    }
-    .button-group button {
-        margin-top: 0;
-        flex-grow: 1;
-        text-align: center;
-    }
-    .high-violation {
-        background-color: #ffdddd;
-        border-left: 3px solid var(--danger-color);
-    }
-    #registerEstablishmentBtn {
-        display: block;
-        width: 100%;
-        text-align: center;
-        margin-top: 20px;
-        padding: 15px;
-        font-size: 1.1em;
-    }
-    .hidden {
-        display: none;
-    }
-    .switch {
-        position: relative;
-        display: inline-block;
-        width: 45px;
-        height: 25px;
-    }
-    .switch input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-    }
-    .slider {
-        position: absolute;
-        cursor: pointer;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background-color: #ccc;
-        -webkit-transition: .4s;
-        transition: .4s;
-        border-radius: 25px;
-    }
-    .slider:before {
-        position: absolute;
-        content: "";
-        height: 19px;
-        width: 19px;
-        left: 3px;
-        bottom: 3px;
-        background-color: white;
-        -webkit-transition: .4s;
-        transition: .4s;
-        border-radius: 50%;
-    }
-    input:checked + .slider {
-        background-color: var(--primary-color);
-    }
-    input:focus + .slider {
-        box-shadow: 0 0 1px var(--primary-color);
-    }
-    input:checked + .slider:before {
-        -webkit-transform: translateX(20px);
-        -ms-transform: translateX(20px);
-        transform: translateX(20px);
-    }
-    .checkbox-group {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin-top: 5px;
-    }
-    .checkbox-group label {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        font-weight: normal;
-        cursor: pointer;
-    }
-    .checkbox-group input[type="checkbox"] {
-        width: auto;
-        margin-bottom: 0;
-    }
-    .item-details-expanded {
-        background-color: #f0fdf4;
-        border-left: 3px solid var(--primary-color);
-        padding: 10px;
-        margin-top: 10px;
-        border-radius: 4px;
-        font-size: 0.9em;
-    }
-    .item-details-expanded p {
-        margin: 5px 0;
-    }
-    .photo-preview-container {
-        margin-top: 10px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-    }
-    .photo-preview-container img {
-        max-width: 100px;
-        max-height: 100px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        object-fit: cover;
-    }
-    .photo-actions {
-        display: flex;
-        gap: 5px;
-        margin-top: 5px;
-    }
-    .photo-actions button {
-        padding: 5px 10px;
-        font-size: 0.8em;
-    }
-    .editable-field {
-        background-color: #fff !important;
-        cursor: text !important;
-    }
-    .action-details {
-        margin-top: 10px;
-        padding: 10px;
-        background-color: #f8f9fa;
-        border-radius: 4px;
-        border-left: 3px solid #6c757d;
-    }
-    #message, .container, .form-section, .search-area {
-        display: block !important;
-        visibility: visible !important;
-        opacity: 1 !important;
-        pointer-events: auto !important;
-    }
-    .actions-section {
-        margin-top: 20px;
-        border-top: 1px solid #ddd;
-        padding-top: 20px;
-    }
-    .actions-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 10px;
-    }
-    .actions-table th, .actions-table td {
-        border: 1px solid #ddd;
-        padding: 8px;
-        text-align: right;
-    }
-    .actions-table th {
-        background-color: #f2f2f2;
-    }
-    .actions-table tr:nth-child(even) {
-        background-color: #f9f9f9;
-    }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?= htmlspecialchars($t['product_details'] ?? 'تفاصيل المنتج'); ?></title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&family=Noto+Sans+Arabic:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Roboto', 'Noto Sans Arabic', sans-serif; }
+        .grade-badge { font-size: 0.875rem; line-height: 1.25rem; padding: 0.25rem 0.75rem; z-index: 10; }
+        .main-image-container { position: relative; height: 400px; width: 100%; cursor: pointer; }
+        .main-image { object-fit: contain; width: 100%; height: 100%; }
+        .image-nav-button { position: absolute; top: 50%; transform: translateY(-50%); width: 2.5rem; height: 2.5rem; display: flex; items-center; justify-content: center; background-color: rgba(0,0,0,0.5); color: white; border-radius: 50%; font-size: 1.5rem; cursor: pointer; transition: background-color 0.3s; }
+        .image-nav-button:hover { background-color: rgba(0,0,0,0.8); }
+        .prev-button { left: 1rem; }
+        .next-button { right: 1rem; }
+        @media (max-width: 768px) {
+            .logo-text { font-size: 1.25rem; }
+            .header-nav { display: none; }
+            .mobile-menu-button { display: block; }
+            .main-image-container { height: 250px; }
+        }
+        /* Lightbox styles */
+        .lightbox { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.9); }
+        .lightbox-content { margin: auto; display: block; max-width: 90%; max-height: 90%; }
+        .close-lightbox { position: absolute; top: 15px; <?= htmlspecialchars($dir) === 'rtl' ? 'left: 35px;' : 'right: 35px;'; ?> color: #f1f1f1; font-size: 40px; font-weight: bold; transition: 0.3s; cursor: pointer; }
+        .close-lightbox:hover, .close-lightbox:focus { color: #bbb; text-decoration: none; cursor: pointer; }
+        
+        /* Property option styles */
+        .property-option {
+            border: 2px solid #e5e7eb; /* Tailwind gray-200 */
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            padding: 0.5rem 1rem; /* Adjusted padding for a better button feel */
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            text-align: center;
+        }
+        .property-option.selected {
+            border-color: #14b8a6; /* Tailwind teal-500 */
+            background-color: #f0fdfa; /* Tailwind teal-50 */
+            color: #0d9488; /* Tailwind teal-600 */
+        }
+        .property-option.disabled {
+            background-color: #f3f4f6; /* Tailwind gray-100 */
+            color: #9ca3af; /* Tailwind gray-400 */
+            cursor: not-allowed;
+            opacity: 0.7;
+            pointer-events: none;
+        }
+        
+        /* Turquoise Color for buttons */
+        .btn-turquoise {
+            background-color: #14b8a6; /* Tailwind teal-500 */
+            color: white;
+            transition: background-color 0.3s;
+        }
+        .btn-turquoise:hover:not(:disabled) {
+            background-color: #0d9488; /* Tailwind teal-600 */
+        }
+        .btn-turquoise:disabled {
+            background-color: #9ca3af; /* Tailwind gray-400 */
+            cursor: not-allowed;
+        }
+        .text-turquoise {
+            color: #14b8a6;
+        }
+        .offer-badge {
+            display: inline-block;
+            background-color: #f97316; /* Tailwind orange-500 */
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.375rem;
+            font-size: 0.75rem;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+    </style>
 </head>
-<body>
-<div class="container" style="direction: rtl;">
-    <div class="header" style="display: flex; align-items: center; justify-content: space-between;">
-        <div class="header-text" style="text-align: right;">
-            <div class="main-title" style="font-weight: bold; font-size: 18px;">إدارة الرقابة والسلامة الصحية</div>
-            <div class="sub-title" style="font-size: 16px;">قسم الرقابة الغذائية</div>
+<body class="bg-gray-100 text-gray-800">
+
+    <header class="bg-white shadow-md sticky top-0 z-50">
+        <div class="container mx-auto px-4 py-3 md:py-4 flex items-center justify-between">
+            <div class="flex items-center">
+                <a href="index.php"><img src="https://mzmz.wuaze.com/platform/logo/main_logo.png?<?= time(); ?>" alt="easyoffer24 Logo" class="h-8 md:h-10 w-auto"></a>
+                <a href="index.php"><span class="logo-text text-lg md:text-xl font-extrabold ml-2 mr-2 text-gray-900"><?= htmlspecialchars($t['platform_name'] ?? 'easyoffer24'); ?></span></a>
+            </div>
+            <nav class="hidden md:flex items-center space-x-4 <?= htmlspecialchars($dir) === 'rtl' ? 'space-x-reverse' : ''; ?> header-nav">
+                <?php if (!isset($_SESSION['user_id'])): ?>
+                    <a href="https://mzmz.wuaze.com/platform/public/login.php" class="flex items-center text-turquoise font-semibold rounded-lg hover:bg-teal-50 px-3 py-2 transition duration-300">
+                        <i class="fas fa-sign-in-alt <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['login'] ?? 'Login'); ?>
+                    </a>
+                    <a href="https://mzmz.wuaze.com/platform/public/register_vendor.php" class="flex items-center btn-turquoise font-semibold rounded-lg px-3 py-2 transition duration-300">
+                        <i class="fas fa-user-plus <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['register'] ?? 'Register'); ?>
+                    </a>
+                <?php else: ?>
+                    <a href="<?= htmlspecialchars($profile_link); ?>" class="flex items-center text-turquoise font-semibold rounded-lg hover:bg-teal-50 px-3 py-2 transition duration-300">
+                        <i class="fas fa-user-circle <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['my_profile'] ?? 'My Profile'); ?>
+                    </a>
+                    <a href="shopping_cart.php" class="relative btn-turquoise font-semibold rounded-lg px-3 py-2 transition duration-300">
+                        <i class="fas fa-shopping-cart"></i> <?= htmlspecialchars($t['cart_button'] ?? 'Cart'); ?>
+                        <?php if (isset($_SESSION['cart'])): ?>
+                            <span class="absolute -top-2 -right-2 inline-flex items-center justify-center w-5 h-5 text-xs font-bold leading-none text-white bg-red-600 rounded-full"><?= htmlspecialchars(count($_SESSION['cart'])); ?></span>
+                        <?php endif; ?>
+                    </a>
+                <?php endif; ?>
+            </nav>
+            <button id="mobile-menu-button" class="md:hidden text-turquoise text-2xl">
+                <i class="fas fa-bars"></i>
+            </button>
         </div>
-        <div class="logo">
-            <img src="shjmunlogo.png" alt="شعار البلدية" style="height: 60px;">
+    </header>
+    <div id="mobile-menu" class="fixed top-0 <?= htmlspecialchars($dir) === 'rtl' ? 'right-0' : 'left-0'; ?> w-64 h-full bg-white shadow-xl z-50 transform <?= htmlspecialchars($dir) === 'rtl' ? 'translate-x-full' : '-translate-x-full'; ?> transition-transform duration-300 md:hidden">
+        <div class="p-4 border-b flex justify-between items-center">
+            <span class="text-xl font-bold"><?= htmlspecialchars($t['platform_name'] ?? 'easyoffer24'); ?></span>
+            <button id="close-menu-button" class="text-turquoise hover:text-teal-800 text-xl"><i class="fas fa-times"></i></button>
         </div>
+        <nav class="flex flex-col p-4 space-y-4 text-sm">
+            <?php if (!isset($_SESSION['user_id'])): ?>
+                <a href="https://mzmz.wuaze.com/platform/public/login.php" class="font-semibold text-turquoise hover:bg-teal-50 p-2 rounded-md"><i class="fas fa-sign-in-alt <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['login'] ?? 'Login'); ?></a>
+                <a href="https://mzmz.wuaze.com/platform/public/register_vendor.php" class="font-semibold text-turquoise hover:bg-teal-50 p-2 rounded-md"><i class="fas fa-user-plus <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['register'] ?? 'Register'); ?></a>
+            <?php else: ?>
+                <a href="<?= htmlspecialchars($profile_link); ?>" class="font-semibold text-turquoise hover:bg-teal-50 p-2 rounded-md"><i class="fas fa-user-circle <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['my_profile'] ?? 'My Profile'); ?></a>
+                <a href="shopping_cart.php" class="font-semibold text-turquoise hover:bg-teal-50 p-2 rounded-md"><i class="fas fa-shopping-cart <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['cart_button'] ?? 'Cart'); ?></a>
+            <?php endif; ?>
+        </nav>
     </div>
-    <h1>التفتيش المبني علي الخطورة</h1>
-    <div id="message"></div>
-    <div class="search-license-box">
-        <label for="fullLicenseSearch">بحث السجلات السابقة برقم الرخصة</label>
-        <input type="text" id="fullLicenseSearch" placeholder="أدخل رقم الرخصة الكامل" />
-        <div class="button-group" style="margin-top: 5px;">
-            <button type="button" class="btn-primary" id="searchFullLicenseBtn">
-                <i class="fas fa-search"></i> بحث
-            </button>
-            <button type="button" class="btn-secondary" id="previousFacilityBtn">
-                <i class="fas fa-arrow-right"></i> السابق
-            </button>
-            <button type="button" class="btn-secondary" id="nextFacilityBtn">
-                <i class="fas fa-arrow-left"></i> التالي
-            </button>
-        </div>
-    </div>
-    <div class="form-section" id="searchSection">
-        <h3>1. إدخال رقم الرخصة للتسجيل</h3>
-        <div class="search-area">
-            <input type="text" id="licenseNo" placeholder="أدخل رقم الرخصة أو المعرف الفريد أو اسم المنشأة">
-            <button id="searchBtn" class="search-btn"><i class="fas fa-search"></i> بحث</button>
-        </div>
-        <button type="button" class="btn-primary hidden" id="registerEstablishmentBtn">
-            <i class="fas fa-plus"></i> تسجيل منشأة جديدة
-        </button>
-        <div id="facilitySelection" class="form-group hidden">
-            <label for="facilitySelector">اختر المنشأة:</label>
-            <select id="facilitySelector">
-                <option value="">-- اختر منشأة --</option>
-            </select>
-        </div>
-        <div id="facilityInfo">
-            <div class="form-grid">
-                <div class="form-group">
-                    <label>اسم المنشأة</label>
-                    <input type="text" id="facilityName" readonly class="readonly">
-                </div>
-                <div class="form-group">
-                    <label>رقم الرخصة</label>
-                    <input type="text" id="licenseNumberDisplay" readonly class="readonly">
-                </div>
-                <div class="form-group">
-                    <label>المعرف الفريد</label>
-                    <input type="text" id="uniqueId" readonly class="readonly">
-                </div>
-                <div class="form-group">
-                    <label>المنطقة</label>
-                    <input type="text" id="area" readonly class="readonly">
-                </div>
-                <div class="form-group">
-                    <label>نوع النشاط</label>
-                    <input type="text" id="activityType" readonly class="readonly">
-                </div>
-                <div class="form-group">
-                    <label>الوحدة</label>
-                    <input type="text" id="unit" readonly class="readonly">
-                </div>
-                <div class="form-group">
-                    <label>SHFHSP</label>
-                    <input type="text" id="shfhsp" readonly class="readonly">
-                </div>
-                <div class="form-group">
-                    <label>فئة الخطر</label>
-                    <input type="text" id="hazardClass" readonly class="readonly">
-                </div>
-                <div class="form-group">
-                    <label>القطاع الفرعي</label>
-                    <input type="text" id="sub_Sector" readonly class="readonly">
-                </div>
-                <div class="form-group">
-                    <label>تاريخ آخر تفتيش</label>
-                    <input type="date" id="lastInspectionDate" readonly class="readonly">
-                </div>
-                <div class="form-group">
-                    <label>تاريخ آخر تقييم للمنشأة</label>
-                    <input type="date" id="lastEvaluationDate" readonly class="readonly">
-                </div>
-                <div class="form-group">
-                    <label>البريد الإلكتروني</label>
-                    <input type="text" id="establishmentEmail" readonly class="readonly">
-                </div>
-            </div>
-            <div id="establishmentActionButtons" class="button-group hidden">
-                <button type="button" class="btn-secondary" id="editEstablishmentBtn">
-                    <i class="fas fa-edit"></i> تعديل المنشأة
-                </button>
-                <button type="button" class="btn-primary" id="evaluateEstablishmentBtn">
-                    <i class="fas fa-star"></i> تقييم المنشأة
-                </button>
-            </div>
-        </div>
-    </div>
-    <div class="form-section hidden" id="inspectionSection">
-        <h3>2. تفاصيل التفتيش</h3>
-        <div class="form-grid">
-            <div class="form-group">
-                <label>تاريخ التفتيش</label>
-                <input type="date" id="inspectionDate" value="<?php echo date('Y-m-d'); ?>">
-            </div>
-            <div class="form-group">
-                <label>نوع التفتيش</label>
-                <select id="inspectionType">
-                    <option value="">-- اختر نوع التفتيش --</option>
-                    <option value="دوري">دوري</option>
-                    <option value="شكوى">شكوى</option>
-                    <option value="حملة">حملة</option>
-                    <option value="ترخيص">ترخيص</option>
-                    <option value="عينات">عينات</option>
-                    <option value="متابعة">إتباع</option>
-                </select>
-            </div>
-            <div class="form-group hidden" id="campaignGroup">
-                <label>اسم الحملة</label>
-                <input type="text" id="campaignName">
-            </div>
-            <div class="form-group">
-                <label>معرف المفتش</label>
-                <input type="number" id="inspectorId" value="<?php echo htmlspecialchars($loggedInUserId); ?>" readonly class="readonly">
-            </div>
-        </div>
-        <div class="form-group">
-            <label>ملاحظات عامة</label>
-            <textarea id="notes"></textarea>
-        </div>
-        <button id="createInspectionBtn"><i class="fas fa-plus-circle"></i> إنشاء التفتيش</button>
-    </div>
-    <div class="form-section hidden" id="itemsSection">
-        <h3>3. بنود التفتيش</h3>
-        <div id="itemsContainer"></div>
-        <div class="button-group">
-            <button id="saveItemsBtn"><i class="fas fa-save"></i> حفظ البنود</button>
-            <button type="button" class="btn-secondary" id="newInspectionBtn">
-                <i class="fas fa-plus"></i> تفتيش جديد
-            </button>
-            <button type="button" class="btn-danger" id="deleteInspectionBtn">
-                <i class="fas fa-trash"></i> حذف النموذج
-            </button>
-        </div>
-    </div>
-    <div class="form-section hidden" id="resultsSection">
-        <h3>4. نتائج التفتيش</h3>
-        <div class="results-grid">
-            <div class="result-item">
-                <strong>رقم التفتيش</strong>
-                <span id="resultInspectionId">-</span>
-            </div>
-            <div class="result-item">
-                <strong>تاريخ التفتيش</strong>
-                <span id="resultDate">-</span>
-            </div>
-            <div class="result-item">
-                <strong>نوع التفتيش</strong>
-                <span id="resultType">-</span>
-            </div>
-            <div class="result-item">
-                <strong>النقاط المخصومة</strong>
-                <span id="resultDeducted">0.00</span>
-            </div>
-            <div class="result-item">
-                <strong>الدرجة النهائية</strong>
-                <span id="resultScore">1000.00</span>
-            </div>
-            <div class="result-item">
-                <strong>النسبة المئوية</strong>
-                <span id="resultPercentage">100%</span>
-            </div>
-            <div class="result-item">
-                <strong>التقدير</strong>
-                <span id="resultGrade">-</span>
-            </div>
-            <div class="result-item">
-                <strong>لون البطاقة</strong>
-                <span id="resultCard">-</span>
-            </div>
-            <div class="result-item">
-                <strong>المخالفات الحرجة</strong>
-                <span id="resultCritical">0</span>
-            </div>
-            <div class="result-item">
-                <strong>المخالفات الهامة</strong>
-                <span id="resultMajor">0</span>
-            </div>
-            <div class="result-item">
-                <strong>المخالفات العامة</strong>
-                <span id="resultGeneral">0</span>
-            </div>
-            <div class="result-item">
-                <strong>المخالفات الإدارية</strong>
-                <span id="resultAdministrative">0</span>
-            </div>
-            <div class="result-item">
-                <strong>موعد التفتيش القادم</strong>
-                <span id="resultNextDate">-</span>
-            </div>
-            <div class="result-item">
-                <strong>رقم المخالفة</strong>
-                <input type="text" id="violationRefNo" class="editable-field" placeholder="أدخل رقم المخالفة">
-            </div>
-            <div class="result-item">
-                <strong>إجمالي قيمة المخالفة</strong>
-                <input type="number" id="totalViolationValue" class="readonly" readonly step="0.01">
-            </div>
-            <div class="result-item">
-                <strong>حالة الاعتماد</strong>
-                <input type="text" id="approvalStatus" class="readonly" value="Pending" readonly>
-            </div>
-            <div class="result-item">
-                <strong>تم الاعتماد بواسطة</strong>
-                <input type="text" id="approvedBy" class="readonly" readonly>
-            </div>
-            <div class="result-item">
-                <strong>تاريخ الاعتماد</strong>
-                <input type="date" id="approvalDate" class="readonly" readonly>
-            </div>
-            <div class="result-item">
-                <strong>آخر تحديث بواسطة</strong>
-                <input type="text" id="updatedBy" class="readonly" readonly>
-            </div>
-        </div>
-        <div class="form-group">
-            <label>ملاحظات التفتيش</label>
-            <textarea id="resultNotes" readonly class="readonly"></textarea>
-        </div>
-        <div class="actions-section">
-            <h4>الإجراءات المتخذة</h4>
-            <div id="actionsContainer">
-                <table class="actions-table">
-                    <thead>
-                        <tr>
-                            <th>نوع الإجراء</th>
-                            <th>رقم الإجراء</th>
-                            <th>المدة (يوم)</th>
-                            <th>الحالة</th>
-                            <th>تاريخ الإنشاء</th>
-                            <th>خيارات</th>
-                        </tr>
-                    </thead>
-                    <tbody id="actionsList">
-                    </tbody>
-                </table>
-            </div>
-            <div class="form-group" style="margin-top: 20px;">
-                <button type="button" class="btn-primary" id="addActionBtn">
-                    <i class="fas fa-plus"></i> إضافة إجراء
-                </button>
-            </div>
-        </div>
-        <div class="button-group">
-            <button type="button" class="btn-primary" id="approveInspectionBtn">
-                <i class="fas fa-check-circle"></i> اعتماد التفتيش
-            </button>
-            <button type="button" class="btn-secondary" id="editInspectionBtn">
-                <i class="fas fa-edit"></i> تعديل التفتيش
-            </button>
-            <button type="button" class="btn-secondary" id="newInspectionBtnResults">
-                <i class="fas fa-plus"></i> تفتيش جديد
-            </button>
-            <button type="button" class="btn-danger" id="deleteInspectionBtnResults">
-                <i class="fas fa-trash"></i> حذف النموذج
-            </button>
-            <button type="button" class="btn-primary" id="printReportBtn">
-                <i class="fas fa-print"></i> طباعة التقرير
-            </button>
-            <button type="button" class="btn-primary" id="emailReportBtn">
-                <i class="fas fa-envelope"></i> إرسال التقرير بالإيميل
-            </button>
-        </div>
-    </div>
-</div>
-<div id="actionModal" class="modal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4);">
-    <div style="background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 400px; max-width: 90%; border-radius: 5px; direction: rtl;">
-        <span id="closeModal" style="float: left; cursor: pointer; font-size: 20px;">×</span>
-        <h3 id="modalTitle" style="text-align: center;">إضافة إجراء جديد</h3>
-        <form id="actionForm">
-            <input type="hidden" id="action_entry_id" value="">
-            <input type="hidden" id="inspection_id" value="">
-            <div class="form-group">
-                <label for="action_name">نوع الإجراء</label>
-                <select id="action_name" class="form-control" required>
-                    <option value="">اختر نوع الإجراء</option>
-                    <option value="إنذار">إنذار</option>
-                    <option value="تحفظ">تحفظ</option>
-                    <option value="إغلاق مؤقت">إغلاق مؤقت</option>
-                    <option value="متابعة">متابعة</option>
-                    <option value="تصرف">تصرف</option>
-                    <option value="إعادة فتح">إعادة فتح</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="action_number">رقم الإجراء</label>
-                <input type="text" id="action_number" class="form-control">
-            </div>
-            <div class="form-group">
-                <label for="action_duration_days">المدة (يوم)</label>
-                <input type="number" id="action_duration_days" class="form-control" min="0">
-            </div>
-            <div class="form-group">
-                <label for="action_status">حالة الإجراء</label>
-                <select id="action_status" class="form-control">
-                    <option value="active">نشط</option>
-                    <option value="cancel">ملغى</option>
-                    <option value="completed">مكتمل</option>
-                </select>
-            </div>
-            <div class="button-group" style="margin-top: 20px;">
-                <button type="button" id="saveActionBtn" class="btn-primary">
-                    <i class="fas fa-save"></i> حفظ
-                </button>
-                <button type="button" id="deleteActionBtn" class="btn-danger" style="display: none;">
-                    <i class="fas fa-trash"></i> حذف
-                </button>
-                <button type="button" id="cancelActionBtn" class="btn-secondary">
-                    <i class="fas fa-times"></i> إلغاء
-                </button>
-            </div>
-        </form>
-    </div>
-</div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Elements
-    const messageDiv = document.getElementById('message');
-    const searchSection = document.getElementById('searchSection');
-    const inspectionSection = document.getElementById('inspectionSection');
-    const itemsSection = document.getElementById('itemsSection');
-    const resultsSection = document.getElementById('resultsSection');
-    const licenseNoInput = document.getElementById('licenseNo');
-    const searchBtn = document.getElementById('searchBtn');
-    const previousInspectionBtn = document.getElementById('previousFacilityBtn');
-    const nextInspectionBtn = document.getElementById('nextFacilityBtn');
-    const registerEstablishmentBtn = document.getElementById('registerEstablishmentBtn');
-    const facilityInfoDiv = document.getElementById('facilityInfo');
-    const facilityNameInput = document.getElementById('facilityName');
-    const licenseNumberDisplay = document.getElementById('licenseNumberDisplay');
-    const areaInput = document.getElementById('area');
-    const activityTypeInput = document.getElementById('activityType');
-    const uniqueIdInput = document.getElementById('uniqueId');
-    const unitInput = document.getElementById('unit');
-    const shfhspInput = document.getElementById('shfhsp');
-    const hazardClassInput = document.getElementById('hazardClass');
-    const sub_SectorInput = document.getElementById('sub_Sector');
-    const lastInspectionDateInput = document.getElementById('lastInspectionDate');
-    const lastEvaluationDateInput = document.getElementById('lastEvaluationDate');
-    const establishmentEmailInput = document.getElementById('establishmentEmail');
-    const establishmentActionButtons = document.getElementById('establishmentActionButtons');
-    const editEstablishmentBtn = document.getElementById('editEstablishmentBtn');
-    const evaluateEstablishmentBtn = document.getElementById('evaluateEstablishmentBtn');
-    const inspectionDateInput = document.getElementById('inspectionDate');
-    const inspectionTypeSelect = document.getElementById('inspectionType');
-    const campaignGroup = document.getElementById('campaignGroup');
-    const campaignNameInput = document.getElementById('campaignName');
-    const inspectorIdInput = document.getElementById('inspectorId');
-    const notesTextarea = document.getElementById('notes');
-    const createInspectionBtn = document.getElementById('createInspectionBtn');
-    const itemsContainer = document.getElementById('itemsContainer');
-    const saveItemsBtn = document.getElementById('saveItemsBtn');
-    const newInspectionBtn = document.getElementById('newInspectionBtn');
-    const deleteInspectionBtn = document.getElementById('deleteInspectionBtn');
-    const resultInspectionId = document.getElementById('resultInspectionId');
-    const resultDate = document.getElementById('resultDate');
-    const resultType = document.getElementById('resultType');
-    const resultDeducted = document.getElementById('resultDeducted');
-    const resultScore = document.getElementById('resultScore');
-    const resultPercentage = document.getElementById('resultPercentage');
-    const resultGrade = document.getElementById('resultGrade');
-    const resultCard = document.getElementById('resultCard');
-    const resultCritical = document.getElementById('resultCritical');
-    const resultMajor = document.getElementById('resultMajor');
-    const resultGeneral = document.getElementById('resultGeneral');
-    const resultAdministrative = document.getElementById('resultAdministrative');
-    const resultNextDate = document.getElementById('resultNextDate');
-    const resultNotes = document.getElementById('resultNotes');
-    const violationRefNoInput = document.getElementById('violationRefNo');
-    const totalViolationValueInput = document.getElementById('totalViolationValue');
-    const approvalStatusInput = document.getElementById('approvalStatus');
-    const approvedByInput = document.getElementById('approvedBy');
-    const approvalDateInput = document.getElementById('approvalDate');
-    const updatedByInput = document.getElementById('updatedBy');
-    const approveInspectionBtn = document.getElementById('approveInspectionBtn');
-    const editInspectionBtn = document.getElementById('editInspectionBtn');
-    const newInspectionBtnResults = document.getElementById('newInspectionBtnResults');
-    const deleteInspectionBtnResults = document.getElementById('deleteInspectionBtnResults');
-    const printReportBtn = document.getElementById('printReportBtn');
-    const emailReportBtn = document.getElementById('emailReportBtn');
-    const actionsList = document.getElementById('actionsList');
-    const addActionBtn = document.getElementById('addActionBtn');
-    const actionModal = document.getElementById('actionModal');
-    const modalTitle = document.getElementById('modalTitle');
-    const actionEntryIdInput = document.getElementById('action_entry_id');
-    const actionInspectionIdInput = document.getElementById('inspection_id');
-    const actionNameSelect = document.getElementById('action_name');
-    const actionNumberInput = document.getElementById('action_number');
-    const actionDurationInput = document.getElementById('action_duration_days');
-    const actionStatusSelect = document.getElementById('action_status');
-    const saveActionBtn = document.getElementById('saveActionBtn');
-    const deleteActionBtn = document.getElementById('deleteActionBtn');
-    const cancelActionBtn = document.getElementById('cancelActionBtn');
-    const closeModal = document.getElementById('closeModal');
-    const facilitySelectionDiv = document.getElementById('facilitySelection');
-    const facilitySelector = document.getElementById('facilitySelector');
-
-    // Application Variables
-    let currentInspectionId = null;
-    let facilityUniqueId = null;
-    let inspectionCodes = [];
-    let allUserInspections = [];
-    let currentInspectionIndex = -1;
-    let isSpecificSearch = true;
-    let searchResults = [];
-    let currentResultIndex = 0;
-    let allFoundFacilities = [];
-    let currentFacilityIndex = 0;
-
-    const loggedInUserId = '<?php echo htmlspecialchars($loggedInUserId); ?>';
-    const loggedInUserName = '<?php echo htmlspecialchars($loggedInUserName); ?>';
-
-    // Utility Functions
-    function showMessage(text, isSuccess) {
-        messageDiv.textContent = text;
-        messageDiv.className = isSuccess ? 'success' : 'error';
-        messageDiv.style.display = 'block';
-        setTimeout(() => {
-            messageDiv.style.display = 'none';
-        }, 5000);
-    }
-
-    function resetFormVisibility() {
-        facilityInfoDiv.style.display = 'none';
-        establishmentActionButtons.style.display = 'none';
-        registerEstablishmentBtn.style.display = 'none';
-        inspectionSection.style.display = 'none';
-        itemsSection.style.display = 'none';
-        resultsSection.style.display = 'none';
-        facilityNameInput.value = '';
-        licenseNumberDisplay.value = '';
-        areaInput.value = '';
-        activityTypeInput.value = '';
-        uniqueIdInput.value = '';
-        unitInput.value = '';
-        shfhspInput.value = '';
-        hazardClassInput.value = '';
-        sub_SectorInput.value = '';
-        lastInspectionDateInput.value = '';
-        lastEvaluationDateInput.value = '';
-        establishmentEmailInput.value = '';
-        licenseNoInput.value = '';
-        facilityUniqueId = null;
-        allFoundFacilities = [];
-        currentInspectionIndex = -1;
-        inspectionDateInput.value = '<?php echo date('Y-m-d'); ?>';
-        inspectionTypeSelect.value = '';
-        campaignGroup.style.display = 'none';
-        campaignNameInput.value = '';
-        inspectorIdInput.value = loggedInUserId;
-        notesTextarea.value = '';
-        currentInspectionId = null;
-        itemsContainer.innerHTML = '';
-        resultInspectionId.textContent = '-';
-        resultDate.textContent = '-';
-        resultType.textContent = '-';
-        resultDeducted.textContent = '0.00';
-        resultScore.textContent = '1000.00';
-        resultPercentage.textContent = '100%';
-        resultGrade.textContent = '-';
-        resultCard.textContent = '-';
-        resultCritical.textContent = '0';
-        resultMajor.textContent = '0';
-        resultGeneral.textContent = '0';
-        resultAdministrative.textContent = '0';
-        resultNextDate.textContent = '-';
-        resultNotes.value = '';
-        violationRefNoInput.value = '';
-        totalViolationValueInput.value = '';
-        approvalStatusInput.value = 'Pending';
-        approvedByInput.value = '';
-        approvalDateInput.value = '';
-        updatedByInput.value = '';
-        messageDiv.style.display = 'none';
-        previousInspectionBtn.style.display = 'none';
-        nextInspectionBtn.style.display = 'none';
-        actionsList.innerHTML = '';
-    }
-
-    async function searchAndLoadInspection(searchTerm, isSpecificSearch = true) {
-        if (!searchTerm && isSpecificSearch) {
-            showMessage('الرجاء إدخال رقم الرخصة أو المعرف الفريد أو اسم المنشأة.', false);
-            resetFormVisibility();
-            return;
-        }
-
-        try {
-            const formData = new FormData();
-            formData.append('action', 'search_establishments');
-            formData.append('searchTerm', searchTerm || '');
-            formData.append('isSpecificSearch', isSpecificSearch ? '1' : '0');
-
-            const response = await fetch('api.php', {
-                method: 'POST',
-                body: formData
-            });
-
-            const data = await response.json();
-
-            if (data.success && data.data && data.data.length > 0) {
-                allFoundFacilities = data.data;
-
-                if (allFoundFacilities.length > 1) {
-                    facilitySelector.innerHTML = '<option value="">-- اختر منشأة --</option>';
-                    allFoundFacilities.forEach(facility => {
-                        const option = document.createElement('option');
-                        option.value = facility.unique_id;
-                        option.textContent = `${facility.facility_name} (رخصة: ${facility.license_no} - المنطقة: ${facility.area} - المعرف: ${facility.unique_id})`;
-                        facilitySelector.appendChild(option);
-                    });
-
-                    facilitySelectionDiv.style.display = 'block';
-                    facilityInfoDiv.style.display = 'none';
-                    inspectionSection.style.display = 'none';
-                    itemsSection.style.display = 'none';
-                    resultsSection.style.display = 'none';
-                    establishmentActionButtons.style.display = 'none';
-                    registerEstablishmentBtn.style.display = 'none';
-
-                    showMessage('تم العثور على عدة منشآت، يرجى الاختيار', true);
-
-                    facilityNameInput.value = '';
-                    areaInput.value = '';
-                    activityTypeInput.value = '';
-                    uniqueIdInput.value = '';
-                    facilityUniqueId = null;
-                } else {
-                    const facility = allFoundFacilities[0];
-                    await populateFacilityFields(facility);
-
-                    facilitySelectionDiv.style.display = 'none';
-                    facilityInfoDiv.style.display = 'block';
-                    await loadInspectionsForFacility(facility.unique_id);
-                    inspectionSection.style.display = 'block';
-                    itemsSection.style.display = 'none';
-                    resultsSection.style.display = 'none';
-                    establishmentActionButtons.style.display = 'flex';
-
-                    editEstablishmentBtn.dataset.uniqueId = facility.unique_id;
-                    evaluateEstablishmentBtn.dataset.uniqueId = facility.unique_id;
-                    registerEstablishmentBtn.style.display = 'none';
-
-                    showMessage('تم العثور على المنشأة بنجاح', true);
-                }
-            } else {
-                showMessage('رقم الرخصة/المعرف الفريد غير موجود. هل ترغب بتسجيل منشأة جديدة؟', false);
-                resetFormVisibility();
-                registerEstablishmentBtn.style.display = 'block';
-                searchSection.style.display = 'block';
-            }
-        } catch (error) {
-            console.error('Error:', error);
-            showMessage('حدث خطأ أثناء البحث', false);
-            resetFormVisibility();
-            registerEstablishmentBtn.style.display = 'block';
-            searchSection.style.display = 'block';
-        }
-    }
-
-    async function loadFacility(facility) {
-        await populateFacilityFields(facility);
-        facilitySelectionDiv.style.display = 'none';
-        facilityInfoDiv.style.display = 'block';
-        await loadInspectionsForFacility(facility.unique_id);
-        inspectionSection.style.display = 'block';
-        itemsSection.style.display = 'none';
-        resultsSection.style.display = 'none';
-        establishmentActionButtons.style.display = 'flex';
-        editEstablishmentBtn.dataset.uniqueId = facility.unique_id;
-        evaluateEstablishmentBtn.dataset.uniqueId = facility.unique_id;
-        showMessage('تم تحميل المنشأة بنجاح', true);
-    }
-
-    document.getElementById('searchFullLicenseBtn').addEventListener('click', () => {
-        const licenseNo = document.getElementById('fullLicenseSearch').value.trim();
-
-        if (!licenseNo) {
-            showMessage('يرجى إدخال رقم الرخصة.', false);
-            return;
-        }
-
-        fetch('api.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                action: 'search_establishments',
-                searchTerm: licenseNo,
-                isSpecificSearch: true
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && Array.isArray(data.data) && data.data.length > 0) {
-                searchResults = data.data;
-                currentResultIndex = 0;
-                loadFacility(searchResults[currentResultIndex]);
-            } else {
-                showMessage('لم يتم العثور على منشآت برقم الرخصة المحدد.', false);
-            }
-        })
-        .catch(err => {
-            console.error('Error during search:', err);
-            showMessage('حدث خطأ أثناء البحث.', false);
-        });
-    });
-
-    document.getElementById('previousFacilityBtn').addEventListener('click', () => {
-        if (searchResults.length > 0 && currentResultIndex > 0) {
-            currentResultIndex--;
-            loadFacility(searchResults[currentResultIndex]);
-        }
-    });
-
-    document.getElementById('nextFacilityBtn').addEventListener('click', () => {
-        if (searchResults.length > 0 && currentResultIndex < searchResults.length - 1) {
-            currentResultIndex++;
-            loadFacility(searchResults[currentResultIndex]);
-        }
-    });
-
-    async function populateFacilityFields(facility) {
-        facilityNameInput.value = facility.facility_name || '';
-        licenseNumberDisplay.value = facility.license_no || '';
-        areaInput.value = facility.area || '';
-        activityTypeInput.value = facility.activity_type || '';
-        uniqueIdInput.value = facility.unique_id || '';
-        facilityUniqueId = facility.unique_id;
-        unitInput.value = facility.unit || '';
-        shfhspInput.value = facility.shfhsp || '';
-        hazardClassInput.value = facility.hazard_class || '';
-        sub_SectorInput.value = facility.Sub_Sector || '';
-        lastInspectionDateInput.value = facility.last_inspection_date || '';
-        lastEvaluationDateInput.value = facility.last_evaluation_date || '';
-        establishmentEmailInput.value = facility.email || '';
-        facilityInfoDiv.style.display = 'block';
-        inspectionSection.style.display = 'block';
-        resultsSection.style.display = 'block';
-        itemsSection.style.display = 'block';
-        establishmentActionButtons.style.display = 'flex';
-    }
-
-    async function loadInspectionsForFacility(uniqueId) {
-        try {
-            const formData = new FormData();
-            formData.append('action', 'get_facility_inspections');
-            formData.append('facility_unique_id', uniqueId);
-            formData.append('inspector_user_id', loggedInUserId);
-
-            const response = await fetch('api.php', {
-                method: 'POST',
-                body: formData
-            });
-
-            const data = await response.json();
-
-            if (data.success && data.data && data.data.length > 0) {
-                allUserInspections = data.data.sort((a, b) => new Date(b.inspection_date) - new Date(a.inspection_date));
-                currentInspectionIndex = 0;
-                displayInspection(allUserInspections[currentInspectionIndex].inspection_id);
-                previousInspectionBtn.style.display = 'block';
-                nextInspectionBtn.style.display = 'block';
-            } else {
-                allUserInspections = [];
-                currentInspectionIndex = -1;
-                showMessage('لا توجد تفتيشات سابقة لهذه المنشأة.', true);
-                previousInspectionBtn.style.display = 'none';
-                nextInspectionBtn.style.display = 'none';
-            }
-        } catch (error) {
-            console.error('Error loading inspections for facility:', error);
-            showMessage('حدث خطأ أثناء تحميل تفتيشات المنشأة.', false);
-        }
-    }
-
-    async function displayInspection(inspectionId) {
-        try {
-            const formData = new FormData();
-            formData.append('action', 'get_inspection_details');
-            formData.append('inspection_id', inspectionId);
-            formData.append('inspector_user_id', loggedInUserId);
-
-            const response = await fetch('api.php', {
-                method: 'POST',
-                body: formData
-            });
-
-            const data = await response.json();
-
-            if (data.success && data.inspection) {
-                const inspection = data.inspection;
-                currentInspectionId = inspection.inspection_id;
-
-                inspectionDateInput.value = inspection.inspection_date;
-                inspectionTypeSelect.value = inspection.inspection_type;
-
-                if (inspection.inspection_type === 'حملة') {
-                    campaignGroup.style.display = 'block';
-                    campaignNameInput.value = inspection.campaign_name || '';
-                } else {
-                    campaignGroup.style.display = 'none';
-                    campaignNameInput.value = '';
-                }
-
-                inspectorIdInput.value = inspection.inspector_user_id;
-                notesTextarea.value = inspection.notes || '';
-
-                resultInspectionId.textContent = inspection.inspection_id;
-                resultDate.textContent = inspection.inspection_date;
-                resultType.textContent = inspection.inspection_type;
-                resultDeducted.textContent = parseFloat(inspection.total_deducted_points || 0).toFixed(2);
-                resultScore.textContent = parseFloat(inspection.final_inspection_score || 0).toFixed(2);
-                resultPercentage.textContent = parseFloat(inspection.percentage_score || 0).toFixed(2) + '%';
-                resultGrade.textContent = inspection.letter_grade || '-';
-                resultCard.textContent = inspection.color_card || '-';
-                resultCritical.textContent = inspection.critical_violations || 0;
-                resultMajor.textContent = inspection.major_violations || 0;
-                resultGeneral.textContent = inspection.general_violations || 0;
-                resultAdministrative.textContent = inspection.administrative_violations || 0;
-                resultNextDate.textContent = inspection.next_inspection_date || 'غير محدد';
-                resultNotes.value = inspection.notes || '';
-
-                violationRefNoInput.value = inspection.violation_ref_no || '';
-                totalViolationValueInput.value = parseFloat(inspection.total_violation_value || 0).toFixed(2);
-                approvalStatusInput.value = inspection.approval_status || 'Pending';
-                approvedByInput.value = inspection.approved_by_username || '';
-                approvalDateInput.value = inspection.approval_date || '';
-                updatedByInput.value = inspection.updated_by_username || '';
-
-                inspectionSection.style.display = 'block';
-                itemsSection.style.display = 'block';
-                resultsSection.style.display = 'block';
-
-                await loadInspectionItems(true, inspectionId);
-                await loadInspectionActions(inspectionId);
-
-                showMessage('تم تحميل بيانات التفتيش بنجاح.', true);
-                previousInspectionBtn.disabled = (currentInspectionIndex <= 0);
-                nextInspectionBtn.disabled = (currentInspectionIndex >= allUserInspections.length - 1);
-            } else {
-                showMessage(data.message || 'فشل جلب بيانات التفتيش.', false);
-                resetFormVisibility();
-            }
-        } catch (error) {
-            console.error('Error displaying inspection:', error);
-            showMessage('حدث خطأ أثناء عرض بيانات التفتيش.', false);
-        }
-    }
-
-    async function loadInspectionActions(inspectionId) {
-        try {
-            const response = await fetch(`inspection_actions_api.php?action=get_all&inspection_id=${inspectionId}`);
-            const data = await response.json();
-
-            if (data.success && data.actions) {
-                actionsList.innerHTML = '';
-                data.actions.forEach(action => {
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td>${action.action_name}</td>
-                        <td>${action.action_number || '-'}</td>
-                        <td>${action.action_duration_days || '-'}</td>
-                        <td>${getActionStatusText(action.action_status)}</td>
-                        <td>${action.created_at}</td>
-                        <td>
-                            <button type="button" class="btn-secondary edit-action-btn" data-action-id="${action.action_entry_id}" style="padding: 3px 8px; font-size: 12px;">
-                                <i class="fas fa-edit"></i>
-                            </button>
-                        </td>
-                    `;
-                    actionsList.appendChild(row);
-                });
-
-                document.querySelectorAll('.edit-action-btn').forEach(btn => {
-                    btn.addEventListener('click', function() {
-                        const actionId = this.getAttribute('data-action-id');
-                        openActionModal(actionId);
-                    });
-                });
-            } else {
-                actionsList.innerHTML = '<tr><td colspan="6" style="text-align: center;">لا توجد إجراءات مسجلة</td></tr>';
-            }
-        } catch (error) {
-            console.error('Error loading inspection actions:', error);
-            actionsList.innerHTML = '<tr><td colspan="6" style="text-align: center; color: red;">حدث خطأ أثناء تحميل الإجراءات</td></tr>';
-        }
-    }
-
-    function getActionStatusText(status) {
-        switch(status) {
-            case 'active': return 'نشط';
-            case 'cancel': return 'ملغى';
-            case 'completed': return 'مكتمل';
-            default: return status;
-        }
-    }
-
-    function openActionModal(actionId = null) {
-        if (actionId) {
-            modalTitle.textContent = 'تعديل الإجراء';
-            deleteActionBtn.style.display = 'block';
-
-            fetch(`inspection_actions_api.php?action=get&action_entry_id=${actionId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        actionEntryIdInput.value = data.action.action_entry_id;
-                        actionInspectionIdInput.value = data.action.inspection_id;
-                        actionNameSelect.value = data.action.action_name;
-                        actionNumberInput.value = data.action.action_number || '';
-                        actionDurationInput.value = data.action.action_duration_days || '';
-                        actionStatusSelect.value = data.action.action_status || 'active';
-                    } else {
-                        showMessage('فشل تحميل بيانات الإجراء', false);
-                    }
-                });
-        } else {
-            modalTitle.textContent = 'إضافة إجراء جديد';
-            deleteActionBtn.style.display = 'none';
-            actionEntryIdInput.value = '';
-            actionInspectionIdInput.value = currentInspectionId;
-            actionNameSelect.value = '';
-            actionNumberInput.value = '';
-            actionDurationInput.value = '';
-            actionStatusSelect.value = 'active';
-        }
-
-        actionModal.style.display = 'block';
-    }
-
-    function closeActionModal() {
-        actionModal.style.display = 'none';
-    }
-
-    async function saveAction() {
-        const formData = new FormData();
-        formData.append('action', actionEntryIdInput.value ? 'update' : 'create');
-        formData.append('action_entry_id', actionEntryIdInput.value);
-        formData.append('inspection_id', actionInspectionIdInput.value);
-        formData.append('action_name', actionNameSelect.value);
-        formData.append('action_number', actionNumberInput.value);
-        formData.append('action_duration_days', actionDurationInput.value);
-        formData.append('action_status', actionStatusSelect.value);
-
-        try {
-            const response = await fetch('inspection_actions_api.php', {
-                method: 'POST',
-                body: formData
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                showMessage('تم حفظ الإجراء بنجاح', true);
-                closeActionModal();
-                await loadInspectionActions(currentInspectionId);
-            } else {
-                showMessage(data.message || 'فشل حفظ الإجراء', false);
-            }
-        } catch (error) {
-            console.error('Error saving action:', error);
-            showMessage('حدث خطأ أثناء حفظ الإجراء', false);
-        }
-    }
-
-    async function deleteAction() {
-        const actionId = actionEntryIdInput.value;
-        if (!actionId) return;
-
-        if (confirm('هل أنت متأكد من حذف هذا الإجراء؟')) {
-            try {
-                const response = await fetch('inspection_actions_api.php', {
-                    method: 'POST',
-                    body: new URLSearchParams({
-                        action: 'delete',
-                        action_entry_id: actionId
-                    })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    showMessage('تم حذف الإجراء بنجاح', true);
-                    closeActionModal();
-                    await loadInspectionActions(currentInspectionId);
-                } else {
-                    showMessage(data.message || 'فشل حذف الإجراء', false);
-                }
-            } catch (error) {
-                console.error('Error deleting action:', error);
-                showMessage('حدث خطأ أثناء حذف الإجراء', false);
-            }
-        }
-    }
-
-    searchBtn.addEventListener('click', () => searchAndLoadInspection(licenseNoInput.value.trim()));
-
-    previousInspectionBtn.addEventListener('click', () => {
-        if (currentInspectionIndex < allUserInspections.length - 1) {
-            currentInspectionIndex++;
-            displayInspection(allUserInspections[currentInspectionIndex].inspection_id);
-        }
-    });
-
-    nextInspectionBtn.addEventListener('click', () => {
-        if (currentInspectionIndex > 0) {
-            currentInspectionIndex--;
-            displayInspection(allUserInspections[currentInspectionIndex].inspection_id);
-        }
-    });
-
-    registerEstablishmentBtn.addEventListener('click', () => {
-        const licenseNo = licenseNoInput.value.trim();
-        window.location.href = `form_est.php?license_no=${encodeURIComponent(licenseNo)}`;
-    });
-
-    editEstablishmentBtn.addEventListener('click', () => {
-        const uniqueId = uniqueIdInput.value;
-        if (uniqueId) {
-            window.location.href = `form_est.php?unique_id=${encodeURIComponent(uniqueId)}`;
-        } else {
-            showMessage('لا يمكن تعديل المنشأة، المعرف الفريد غير موجود.', false);
-        }
-    });
-
-    evaluateEstablishmentBtn.addEventListener('click', () => {
-        const uniqueId = uniqueIdInput.value;
-        if (uniqueId) {
-            window.location.href = `evaluation_form.php?unique_id=${encodeURIComponent(uniqueId)}`;
-        } else {
-            showMessage('لا يمكن تقييم المنشأة، المعرف الفريد غير موجود.', false);
-        }
-    });
-
-    inspectionTypeSelect.addEventListener('change', function() {
-        if (this.value === 'حملة') {
-            campaignGroup.style.display = 'block';
-        } else {
-            campaignGroup.style.display = 'none';
-            campaignNameInput.value = '';
-        }
-    });
-
-    createInspectionBtn.addEventListener('click', async function() {
-        if (!facilityUniqueId) {
-            showMessage('الرجاء البحث عن منشأة أولاً وتحديدها', false);
-            return;
-        }
-
-        if (!inspectionDateInput.value || !inspectionTypeSelect.value) {
-            showMessage('الرجاء تعبئة جميع الحقول المطلوبة', false);
-            return;
-        }
-
-        try {
-            const formData = new FormData();
-            formData.append('action', 'create_inspection');
-            formData.append('facility_unique_id', facilityUniqueId);
-            formData.append('inspection_date', inspectionDateInput.value);
-            formData.append('inspection_type', inspectionTypeSelect.value);
-            formData.append('inspector_user_id', inspectorIdInput.value);
-
-            if (inspectionTypeSelect.value === 'حملة' && campaignNameInput.value) {
-                formData.append('campaign_name', campaignNameInput.value);
-            }
-
-            if (notesTextarea.value) {
-                formData.append('notes', notesTextarea.value);
-            }
-
-            const response = await fetch('api.php', {
-                method: 'POST',
-                body: formData
-            });
-
-            const data = await response.json();
-
-            if (data.success) {
-                currentInspectionId = data.inspection_id;
-
-                resultInspectionId.textContent = currentInspectionId;
-                resultDate.textContent = inspectionDateInput.value;
-                resultType.textContent = inspectionTypeSelect.value;
-                resultNotes.value = notesTextarea.value;
-
-                inspectionSection.style.display = 'none';
-                itemsSection.style.display = 'block';
-                resultsSection.style.display = 'none';
-
-                await loadInspectionItems();
-
-                showMessage('تم إنشاء التفتيش بنجاح', true);
-            } else {
-                showMessage(data.message || 'فشل إنشاء التفتيش', false);
-            }
-        } catch (error) {
-            console.error('Error:', error);
-            showMessage('حدث خطأ أثناء إنشاء التفتيش', false);
-        }
-    });
-
-    async function loadInspectionItems(isEditingExisting = false, inspectionIdToLoad = null) {
-        itemsContainer.innerHTML = 'جارٍ تحميل بنود التفتيش...';
-
-        try {
-            const formData = new FormData();
-            formData.append('action', 'get_inspection_codes');
-            formData.append('facility_unique_id', facilityUniqueId);
-
-            if (isEditingExisting && inspectionIdToLoad) {
-                formData.append('inspection_id', inspectionIdToLoad);
-            }
-
-            const response = await fetch('api.php', {
-                method: 'POST',
-                body: formData
-            });
-
-            const data = await response.json();
-
-            if (data.success && data.data && data.data.length > 0) {
-                inspectionCodes = data.data;
-                renderInspectionItems();
-            } else {
-                itemsContainer.innerHTML = '<p>لا توجد بنود تفتيش متاحة</p>';
-                showMessage('لا توجد بنود تفتيش لهذه المنشأة', false);
-            }
-        } catch (error) {
-            console.error('Error:', error);
-            itemsContainer.innerHTML = '<p style="color:red;">حدث خطأ أثناء تحميل البنود</p>';
-            showMessage('حدث خطأ أثناء تحميل بنود التفتيش', false);
-        }
-    }
-
-    async function renderInspectionItems() {
-        itemsContainer.innerHTML = '';
-
-        for (const item of inspectionCodes) {
-            const itemDiv = document.createElement('div');
-            itemDiv.className = 'item-row';
-
-            let previousViolationIndicator = '';
-            let isRepeatedViolation = false;
-            let repeatedCount = 0;
-
-            try {
-                const prevViolationsForm = new FormData();
-                prevViolationsForm.append('action', 'check_previous_violation');
-                prevViolationsForm.append('facility_unique_id', facilityUniqueId);
-                prevViolationsForm.append('code_id', item.code_id);
-
-                const prevViolationsResponse = await fetch('api.php', {
-                    method: 'POST',
-                    body: prevViolationsForm
-                });
-
-                const prevViolationsData = await prevViolationsResponse.json();
-
-                if (prevViolationsData.success) {
-                    isRepeatedViolation = prevViolationsData.is_repeated_violation;
-                    repeatedCount = prevViolationsData.repeated_count || 0;
-
-                    if (isRepeatedViolation) {
-                        previousViolationIndicator = '<span class="previous-violation-indicator">مخالفة سابقة</span>';
-                    }
-                }
-            } catch (error) {
-                console.error('Error checking previous violation:', error);
-            }
-
-            const existingItemData = item.inspection_item_data || {};
-            const isViolationChecked = existingItemData.is_violation === 1;
-            const preselectedAction = existingItemData.action_taken || '';
-            const preselectedConditionLevel = existingItemData.condition_level || '';
-            const preselectedDeductedPoints = parseFloat(existingItemData.deducted_points || 0).toFixed(2);
-            const preselectedWarningDuration = existingItemData.warning_duration || ''; // This variable is not used anywhere, seems to be a remnant.
-            const preselectedViolationValue = existingItemData.violation_value || '';
-            const preselectedNotes = existingItemData.inspector_notes || '';
-            const preselectedPhotoPath = existingItemData.inspection_photo_path || '';
-
-            itemDiv.innerHTML = `
-                <div class="item-header">
-                    <p><strong>${item.code_id} - ${item.code_description}</strong> ${previousViolationIndicator}</p>
-                    <div class="violation-toggle-group">
-                        <label class="switch">
-                            <input type="checkbox" id="isViolation_${item.code_id}" class="is-violation-checkbox" data-code-id="${item.code_id}" ${isViolationChecked ? 'checked' : ''}>
-                            <span class="slider round"></span>
-                        </label>
-                        <span>هل يوجد مخالفة؟</span>
+    <main class="container mx-auto px-4 py-6">
+        <a href="index.php" class="text-turquoise hover:underline mb-4 text-sm block"><i class="fas fa-arrow-left <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['go_back'] ?? 'Go back'); ?></a>
+        
+        <div class="bg-white rounded-lg shadow-lg p-6 lg:p-8">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+                <div class="bg-gray-50 p-4 rounded-lg shadow-inner border border-gray-200">
+                    <div class="main-image-container mb-4">
+                        <img id="main-product-image" src="<?= htmlspecialchars($all_images[0] ?? 'https://mzmz.wuaze.com/platform/assets/placeholder.jpg'); ?>" alt="<?= htmlspecialchars($product['product_name'] ?? ''); ?>" class="rounded-lg main-image">
+                        <?php if (count($all_images) > 1): ?>
+                        <button id="prev-button" class="image-nav-button prev-button focus:outline-none">
+                            <i class="fas fa-chevron-<?= htmlspecialchars($dir) === 'rtl' ? 'right' : 'left'; ?>"></i>
+                        </button>
+                        <button id="next-button" class="image-nav-button next-button focus:outline-none">
+                            <i class="fas fa-chevron-<?= htmlspecialchars($dir) === 'rtl' ? 'left' : 'right'; ?>"></i>
+                        </button>
+                        <?php endif; ?>
                     </div>
                 </div>
-                <div class="item-details-expanded">
-                    <p><strong>الفئة:</strong> ${item.code_category || 'N/A'}</p>
-                    <p><strong>تصنيف البند:</strong> ${item.code_categorized || 'N/A'}</p>
-                    <p><strong> الإجراء الافتراضي:</strong> ${item.default_action_type || 'N/A'}</p>
-                    <p><strong>الإجراء التصحيحي:</strong> ${item.fixed_corrective_action || 'N/A'}</p>
-                    <p><strong>قيمة المخالفة:</strong> ${item.violation_value_text || 'N/A'}</p>
-                    <p><strong>المراجع:</strong> ${item.standard_reference || 'N/A'}</p>
-                </div>
-                <div class="violation-details ${isViolationChecked ? '' : 'hidden'}">
-                    <div class="form-group">
-                        <label>الإجراء المتخذ</label>
-                        <select class="action-select" data-code-id="${item.code_id}" data-code-category="${item.code_category}" data-is-repeated-violation="${isRepeatedViolation ? '1' : '0'}" data-initial-repeated-count="${repeatedCount}">
-                            <option value="">-- اختر الإجراء --</option>
-                            <option value="لا يوجد إجراء" ${preselectedAction === 'لا يوجد إجراء' ? 'selected' : ''}>لا يوجد إجراء</option>
-                            <option value="إجراء تصحيحي" ${preselectedAction === 'إجراء تصحيحي' ? 'selected' : ''}>إجراء تصحيحي</option>
-                            <option value="انذار" ${preselectedAction === 'انذار' ? 'selected' : ''}>انذار</option>
-                            <option value="مخالفة" ${preselectedAction === 'مخالفة' ? 'selected' : ''}>مخالفة</option>
-                        </select>
+
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-900 mb-2"><?= htmlspecialchars($product['product_name'] ?? $t['product_not_found'] ?? 'Product Not Found'); ?></h1>
+                    
+                    <div class="flex items-center space-x-2 <?= htmlspecialchars($dir) === 'rtl' ? 'space-x-reverse' : ''; ?> mb-2 text-sm text-gray-600">
+                        <span><i class="fas fa-shop"></i> <?= htmlspecialchars($t['from_vendor'] ?? 'From Vendor'); ?>: <span class="font-bold"><?= htmlspecialchars($product['vendor_name'] ?? ''); ?></span></span>
                     </div>
-                    <div class="form-group">
-                        <label>مستوى الحالة</label>
-                        <input type="text" class="condition-level-display" data-code-id="${item.code_id}"
-                               value="${preselectedConditionLevel}" readonly class="readonly">
+                    
+                    <div class="flex items-baseline space-x-2 <?= htmlspecialchars($dir) === 'rtl' ? 'space-x-reverse' : ''; ?> mb-4">
+                        <span class="text-3xl font-extrabold text-turquoise" id="product-price-display">
+                            <?= htmlspecialchars(number_format($base_price, 2)); ?>
+                        </span>
+                        <span class="text-turquoise text-xl font-extrabold"><?= htmlspecialchars($t['currency'] ?? 'AED'); ?></span>
+                        <input type="hidden" id="product-id" value="<?= htmlspecialchars($product['id'] ?? ''); ?>">
+                        <input type="hidden" id="product-base-price" value="<?= htmlspecialchars($base_price); ?>">
+                        <input type="hidden" id="product-tax-rate" value="<?= htmlspecialchars($tax_rate); ?>">
+                        <input type="hidden" id="has-skus" value="<?= htmlspecialchars($has_skus ? '1' : '0'); ?>">
+
+                        <?php if ($discount_price > 0 && $original_price > $discount_price): ?>
+                            <span class="text-xl text-gray-500 line-through ml-4" id="product-original-price-display">
+                                <?= htmlspecialchars(number_format($original_price, 2)); ?>
+                            </span>
+                            <span class="ml-2 text-sm font-bold text-red-500">
+                                (-<?= htmlspecialchars($discount_percentage); ?>%)
+                            </span>
+                        <?php endif; ?>
                     </div>
-                    <div class="form-group">
-                        <label>النقاط المخصومة</label>
-                        <input type="number" class="points-input" data-code-id="${item.code_id}"
-                               value="${preselectedDeductedPoints}" step="0.01" readonly class="readonly">
+                    
+                    <?php if (!empty($offers)): ?>
+                    <div class="mb-4">
+                        <h4 class="font-bold text-sm text-gray-900 mb-2"><?= htmlspecialchars($t['available_offers'] ?? 'Available Offers'); ?>:</h4>
+                        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
+                            <?php foreach ($offers as $offer): ?>
+                                <?php if ($offer['offer_type'] === 'percentage'): ?>
+                                    <li><span class="offer-badge"><?= htmlspecialchars($offer['offer_value']); ?>% OFF</span> <?= htmlspecialchars($t['offer_details_percentage'] ?? 'خصم على هذا المنتج'); ?></li>
+                                <?php elseif ($offer['offer_type'] === 'buy_x_get_y'): ?>
+                                    <li>
+                                        <span class="offer-badge"><?= htmlspecialchars($t['offer_buy_x_get_y'] ?? 'Buy %s Get %s'); ?></span> 
+                                        <?= sprintf(htmlspecialchars($t['offer_details_buy_x_get_y'] ?? 'Buy %s and get %s for free.'), htmlspecialchars($offer['buy_quantity']), htmlspecialchars($offer['get_quantity'])); ?>
+                                    </li>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                        </ul>
                     </div>
-                    <div class="form-group">
-                        <label>عدد التكرارات السابقة</label>
-                        <input type="text" class="repeated-count-display" data-code-id="${item.code_id}"
-                               value="${repeatedCount}" readonly class="readonly">
-                    </div>
-                    <div class="form-group violation-value-group ${preselectedAction === 'مخالفة' ? '' : 'hidden'}">
-                        <label>قيمة المخالفة</label>
-                        <input type="number" class="violation-value-input" data-code-id="${item.code_id}"
-                               placeholder="أدخل قيمة المخالفة" step="0.01" value="${preselectedViolationValue}">
-                    </div>
-                    <div class="form-group">
-                        <label>صورة التفتيش</label>
-                        <input type="file" accept="image/*" capture="environment" class="inspection-photo-input" data-code-id="${item.code_id}" style="display: none;">
-                        <button type="button" class="capture-photo-btn" data-code-id="${item.code_id}" data-inspection-id="${currentInspectionId}">التقاط صورة</button>
-                        <div class="photo-preview-container" data-code-id="${item.code_id}">
-                            ${preselectedPhotoPath ? `<img src="${preselectedPhotoPath}" alt="Inspection Photo">` : ''}
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label>ملاحظات المفتش</label>
-                        <textarea class="notes-input" data-code-id="${item.code_id}"
-                                  placeholder="ملاحظات إضافية">${preselectedNotes}</textarea>
-                    </div>
-                </div>
-            `;
-            itemsContainer.appendChild(itemDiv);
+                    <?php endif; ?>
 
-            const isViolationCheckbox = itemDiv.querySelector('.is-violation-checkbox');
-            const violationDetailsDiv = itemDiv.querySelector('.violation-details');
-            const actionSelect = itemDiv.querySelector('.action-select');
-            const conditionLevelDisplay = itemDiv.querySelector('.condition-level-display');
-            const pointsInput = itemDiv.querySelector('.points-input');
-            const violationValueGroup = itemDiv.querySelector('.violation-value-group');
-            const violationValueInput = itemDiv.querySelector('.violation-value-input');
-            const notesInput = itemDiv.querySelector('.notes-input');
-            const capturePhotoBtn = itemDiv.querySelector('.capture-photo-btn');
-            const inspectionPhotoInput = itemDiv.querySelector('.inspection-photo-input');
-            const photoPreviewContainer = itemDiv.querySelector('.photo-preview-container');
-            const viewPhotoBtn = photoPreviewContainer.querySelector('.view-photo-btn');
-            const deletePhotoBtn = photoPreviewContainer.querySelector('.delete-photo-btn');
-
-
-            function toggleViolationFields(enable) {
-                actionSelect.disabled = !enable;
-                notesInput.disabled = !enable;
-                capturePhotoBtn.disabled = !enable;
-                violationValueInput.disabled = !enable;
-
-                if (!enable) {
-                    actionSelect.value = '';
-                    conditionLevelDisplay.value = '';
-                    pointsInput.value = '0.00';
-                    pointsInput.dataset.conditionLevel = '';
-                    violationValueGroup.style.display = 'none';
-                    violationValueInput.value = '';
-                    notesInput.value = '';
-                    photoPreviewContainer.innerHTML = '';
-                } else {
-                    const currentAction = actionSelect.value;
-                    if (currentAction === 'مخالفة') {
-                        violationValueGroup.style.display = 'block';
-                    } else {
-                        violationValueGroup.style.display = 'none';
-                    }
-                }
-            }
-
-            isViolationCheckbox.addEventListener('change', function() {
-                if (this.checked) {
-                    violationDetailsDiv.style.display = 'block';
-                    toggleViolationFields(true);
-                    actionSelect.dispatchEvent(new Event('change'));
-                } else {
-                    violationDetailsDiv.style.display = 'none';
-                    toggleViolationFields(false);
-                }
-            });
-
-            // Initial state based on existing data
-            toggleViolationFields(isViolationChecked);
-            actionSelect.dispatchEvent(new Event('change'));
-
-            actionSelect.addEventListener('change', function() {
-                const selectedAction = this.value;
-                const codeCategory = this.dataset.codeCategory;
-                const isRepeated = this.dataset.isRepeatedViolation === '1';
-                let conditionLevel = '';
-
-                // Assuming warningDurationGroup and warningDurationInput are for a specific field,
-                // which is not explicitly defined in the provided snippets.
-                // If these are not defined, they might throw an error. Commenting them out for now.
-                // warningDurationGroup.style.display = 'none';
-                // warningDurationInput.disabled = true;
-
-                violationValueGroup.style.display = 'none';
-                violationValueInput.disabled = true;
-
-                if (selectedAction) {
-                    let points = 0;
-
-                    if (selectedAction === 'إجراء تصحيحي') {
-                        conditionLevel = 'Condition I';
-                        points = 0;
-                    } else if (selectedAction === 'انذار') {
-                        conditionLevel = 'Condition II';
-                        points = calculatePoints(codeCategory, conditionLevel);
-                        // warningDurationGroup.style.display = 'block';
-                        // warningDurationInput.disabled = false;
-                    } else if (selectedAction === 'مخالفة') {
-                        if (isRepeated) {
-                            conditionLevel = 'Condition V';
-                        } else {
-                            if (codeCategory === 'Critical') {
-                                conditionLevel = 'Condition IV';
-                            } else if (codeCategory === 'Major' || codeCategory === 'General') {
-                                conditionLevel = 'Condition III';
-                            } else {
-                                conditionLevel = 'Condition III'; // Default for other categories if not Critical/Major/General
-                            }
-                        }
-                        points = calculatePoints(codeCategory, conditionLevel);
-                        violationValueGroup.style.display = 'block';
-                        violationValueInput.disabled = false;
-                    } else {
-                        conditionLevel = 'N/A';
-                        points = 0;
-                    }
-                    conditionLevelDisplay.value = conditionLevel;
-                    pointsInput.value = points.toFixed(2);
-                    pointsInput.dataset.conditionLevel = conditionLevel;
-                } else {
-                    conditionLevelDisplay.value = '';
-                    pointsInput.value = '0.00';
-                    pointsInput.dataset.conditionLevel = '';
-                }
-            });
-
-            capturePhotoBtn.addEventListener('click', function() {
-                inspectionPhotoInput.click();
-            });
-            inspectionPhotoInput.addEventListener('change', async function(event) {
-                const file = event.target.files[0];
-                if (!file) return;
-
-                const codeId = this.dataset.codeId;
-                if (!currentInspectionId) {
-                    showMessage('الرجاء إنشاء التفتيش أولاً قبل التقاط الصور.', false);
-                    return;
-                }
-
-                const fileName = `inspection_${currentInspectionId}_code_${codeId}_${Date.now()}.jpg`;
-                const uploadUrl = 'upload_inspection_image.php?action=upload_inspection_photo';
-
-                try {
-                    const resizedImage = await resizeImage(file, 800, 600);
-                    const formData = new FormData();
-                    formData.append('file', resizedImage, fileName);
-                    formData.append('code_id', codeId);
-                    formData.append('inspection_id', currentInspectionId);
-                    const response = await fetch(uploadUrl, {
-                        method: 'POST',
-                        body: formData
-                    });
-                    const result = await response.json();
-                    if (result.success) {
-                        showMessage('تم رفع الصورة بنجاح!', true);
-                        photoPreviewContainer.innerHTML = `
-                            <img src="${result.file_path}" alt="Inspection Photo">
-                            <div class="photo-actions">
-                                <button type="button" class="btn-secondary view-photo-btn" data-photo-path="${result.file_path}">عرض</button>
-                                <button type="button" class="btn-danger delete-photo-btn" data-code-id="${codeId}">حذف</button>
+                    <div class="mt-8">
+                        <h3 class="text-xl font-bold text-gray-900 mb-4 border-b pb-2"><?= htmlspecialchars($t['product_properties'] ?? 'خصائص المنتج'); ?></h3>
+                        <?php if (!empty($product_properties)): ?>
+                            <div id="product-properties-container">
+                                <?php foreach ($product_properties as $propertyData): ?>
+                                    <div class="mb-4 property-group" data-property-name-id="<?= htmlspecialchars($propertyData['name_id']); ?>">
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                                            <?= htmlspecialchars($propertyData['name']); ?>:
+                                        </label>
+                                        <div class="flex flex-wrap gap-2">
+                                            <?php foreach ($propertyData['values'] as $value): ?>
+                                                <button type="button" 
+                                                        class="property-option"
+                                                        data-property-value-id="<?= htmlspecialchars($value['id']); ?>"
+                                                        data-property-name-id="<?= htmlspecialchars($propertyData['name_id']); ?>">
+                                                    <?= htmlspecialchars($value['value']); ?>
+                                                </button>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
                             </div>
-                        `;
-                        photoPreviewContainer.dataset.imagePath = result.file_path;
-                        // Re-attach event listeners for newly created buttons
-                        photoPreviewContainer.querySelector('.view-photo-btn').addEventListener('click', function() {
-                            const photoPath = this.dataset.photoPath;
-                            window.open(photoPath, '_blank');
+                        <?php else: ?>
+                            <p class="text-sm text-gray-700 leading-relaxed"><?= htmlspecialchars($t['no_properties'] ?? 'لا يوجد خصائص متاحة لهذا المنتج.'); ?></p>
+                        <?php endif; ?>
+                    </div>
+                    
+                    <div class="flex flex-wrap gap-x-4 gap-y-2 text-sm text-gray-500 mb-4 border-b pb-4">
+                        <span><i class="fas fa-warehouse"></i> <?= htmlspecialchars($t['stock'] ?? 'In Stock'); ?>: <span class="font-bold" id="product-quantity-display">
+                            <?= htmlspecialchars($total_quantity); ?>
+                        </span></span>
+                        <span><i class="fas fa-shopping-cart"></i> <?= htmlspecialchars($t['sold'] ?? 'Sold'); ?>: <span class="font-bold"><?= htmlspecialchars($product['total_sales'] ?? 0); ?></span></span>
+                        <span><i class="fas fa-star"></i> <?= htmlspecialchars($t['ratings'] ?? 'Ratings'); ?>: <span class="font-bold"><?= htmlspecialchars($product['total_ratings'] ?? 0); ?></span></span>
+                        <span class="flex items-center"><i class="fas fa-truck-fast"></i> <?= htmlspecialchars($t['shipping'] ?? 'Shipping'); ?>: <span class="font-bold ml-1"><?= $shipping_status; ?></span></span>
+                        <span><i class="fas fa-percent"></i> <?= htmlspecialchars($t['tax_rate'] ?? 'Tax Rate'); ?>: <span class="font-bold"><?= htmlspecialchars(number_format($tax_rate, 2)); ?>%</span></span>
+                    </div>
+                    
+                    <div class="mb-4 p-3 bg-gray-100 rounded-md">
+                        <p class="font-bold text-sm"><?= htmlspecialchars($t['price_with_tax'] ?? 'Price Including Tax'); ?>:</p>
+                        <p class="text-xl font-extrabold text-turquoise" id="product-price-with-tax-display">
+                            <?= htmlspecialchars(number_format($base_price + ($base_price * $tax_rate / 100), 2)); ?>
+                        </p>
+                    </div>
+
+                    <form action="shopping_cart.php" method="POST" id="add-to-cart-form">
+                        <input type="hidden" name="add_to_cart" value="1">
+                        <input type="hidden" name="product_id" value="<?= htmlspecialchars($product['id'] ?? ''); ?>">
+                        <input type="hidden" name="property_value_ids" id="property-value-ids-input">
+                        <button type="submit" id="add-to-cart-button" class="w-full btn-turquoise py-3 rounded-lg font-bold text-sm hover:bg-teal-700 transition duration-300" disabled title="">
+                            <i class="fas fa-cart-plus <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['add_to_cart_button'] ?? 'Add to Cart'); ?>
+                        </button>
+                    </form>
+                </div>
+            </div>
+            
+            <hr class="my-8">
+
+            <div class="mt-8">
+                <h3 class="text-xl font-bold text-gray-900 mb-4 border-b pb-2"><?= htmlspecialchars($t['product_description'] ?? 'وصف المنتج'); ?></h3>
+                <p class="text-sm text-gray-700 leading-relaxed"><?= nl2br(htmlspecialchars($product['description'] ?? $t['no_description'] ?? 'لا يوجد وصف متاح لهذا المنتج.')); ?></p>
+            </div>
+            
+            <hr class="my-8">
+
+            <div class="mt-8 relative p-6 rounded-lg shadow-md bg-white">
+                <h3 class="text-xl font-bold text-gray-900 mb-4 border-b pb-2"><?= htmlspecialchars($t['vendor_transparency'] ?? 'شفافية التاجر'); ?></h3>
+                <div class="flex items-center gap-2 mb-2">
+                    <div class="flex items-center gap-2">
+                        <p class="text-sm text-gray-700 flex items-center gap-2">
+                            <i class="fas fa-shop text-2xl text-turquoise"></i>
+                            <span class="font-bold"><?= htmlspecialchars($product['vendor_name'] ?? ''); ?></span>
+                        </p>
+                        <span class="grade-badge font-bold px-2 py-1 rounded-full shadow-sm <?= htmlspecialchars($vendor_transparency['color'] ?? ''); ?>">
+                            <?= htmlspecialchars($vendor_transparency['grade'] ?? 'N/A'); ?> (<?= htmlspecialchars($vendor_transparency['description'] ?? 'N/A'); ?>)
+                        </span>
+                    </div>
+                </div>
+                <p class="text-sm text-gray-700 mb-2"><?= htmlspecialchars($t['complaints_vendor'] ?? 'الشكاوى ضد التاجر'); ?>: <span class="font-bold text-red-500"><?= htmlspecialchars($product['vendor_complaint_count'] ?? 0); ?></span></p>
+                
+                <?php if (!empty($product_complaints)): ?>
+                <div class="mt-4">
+                    <h4 class="font-bold text-sm text-red-600 mb-2"><?= htmlspecialchars($t['product_complaints'] ?? 'شكاوى على هذا المنتج'); ?>:</h4>
+                    <div class="space-y-2 text-xs text-gray-700">
+                        <?php foreach ($product_complaints as $complaint): ?>
+                            <div class="bg-red-50 p-2 rounded-md border border-red-200">
+                                <p><?= htmlspecialchars($complaint['complaint_text']); ?></p>
+                                <p class="text-gray-500 mt-1">
+                                    <i class="fas fa-user-circle"></i> <?= htmlspecialchars($complaint['user_name'] ?? 'User'); ?> | <i class="far fa-calendar-alt"></i> Date: <?= htmlspecialchars(date('Y-m-d', strtotime($complaint['complaint_date']))); ?>
+                                </p>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endif; ?>
+            </div>
+            
+            <hr class="my-8">
+
+            <div class="mt-8">
+                <h3 class="text-xl font-bold text-gray-900 mb-4 border-b pb-2"><?= htmlspecialchars($t['product_ratings'] ?? 'تقييمات المنتج'); ?></h3>
+                <div class="space-y-4">
+                    <?php if (empty($reviews_by_star[5]) && empty($reviews_by_star[4]) && empty($reviews_by_star[3]) && empty($reviews_by_star[2]) && empty($reviews_by_star[1])): ?>
+                         <div class="text-center text-gray-500"><?= htmlspecialchars($t['no_ratings_yet'] ?? 'No ratings yet.'); ?></div>
+                    <?php else: ?>
+                        <?php for ($star = 5; $star >= 1; $star--): ?>
+                        <div class="p-4 bg-gray-50 rounded-lg shadow-sm border border-gray-200">
+                            <div class="flex items-center text-sm mb-2">
+                                <div class="text-yellow-400">
+                                    <?php for ($i = 0; $i < $star; $i++): ?>
+                                        <i class="fas fa-star"></i>
+                                    <?php endfor; ?>
+                                    <?php for ($i = $star; $i < 5; $i++): ?>
+                                        <i class="far fa-star"></i>
+                                    <?php endfor; ?>
+                                </div>
+                                <span class="text-gray-600 ml-2">(<?= htmlspecialchars($star_ratings[$star]); ?>)</span>
+                            </div>
+                            <div class="space-y-2">
+                                <?php if (empty($reviews_by_star[$star])): ?>
+                                     <p class="text-xs text-gray-500"><?= htmlspecialchars($t['no_comments_for_rating'] ?? 'No comments for this rating yet.'); ?></p>
+                                <?php else: ?>
+                                    <?php foreach ($reviews_by_star[$star] as $review): ?>
+                                        <div class="bg-white p-2 rounded-md border border-gray-100">
+                                            <p class="text-sm"><?= nl2br(htmlspecialchars($review['comment'])); ?></p>
+                                            <p class="text-xs text-gray-500 mt-1">
+                                                <i class="fas fa-user-circle"></i> <?= htmlspecialchars($review['user_name']); ?> | <i class="far fa-calendar-alt"></i> Date: <?= htmlspecialchars(date('Y-m-d', strtotime($review['review_date']))); ?>
+                                            </p>
+                                        </div>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        <?php endfor; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="imageLightbox" class="lightbox">
+        <span class="close-lightbox">&times;</span>
+        <img class="lightbox-content" id="lightboxImage">
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const propertyGroups = document.querySelectorAll('.property-group');
+            const propertyOptions = document.querySelectorAll('.property-option');
+            const priceElement = document.getElementById('product-price-display');
+            const priceWithTaxElement = document.getElementById('product-price-with-tax-display');
+            const quantityElement = document.getElementById('product-quantity-display');
+            const selectedPropertiesInput = document.getElementById('property-value-ids-input');
+            const addToCartButton = document.getElementById('add-to-cart-button');
+            const basePrice = parseFloat('<?= htmlspecialchars($base_price); ?>');
+            const taxRate = parseFloat('<?= htmlspecialchars($tax_rate); ?>');
+            const totalQuantity = parseInt('<?= htmlspecialchars($total_quantity); ?>');
+            const hasSkus = document.getElementById('has-skus').value === '1';
+            const hasProperties = propertyGroups.length > 0;
+            
+            // جلب بيانات SKUs والخصائص من PHP إلى JavaScript
+            const skusData = <?= json_encode($skus_data); ?>;
+            const productProperties = <?= json_encode($product_properties); ?>;
+            
+            // خريطة لتحديد ترتيب الخصائص
+            const propertyOrder = productProperties.map(prop => prop.name_id);
+
+            // إذا لم يكن هناك خصائص، تمكين الزر مباشرة
+            if (!hasProperties) {
+                addToCartButton.disabled = totalQuantity <= 0;
+                if (totalQuantity <= 0) {
+                    addToCartButton.title = "<?= htmlspecialchars($t['out_of_stock'] ?? 'Out of stock'); ?>";
+                }
+            }
+
+            function updateProductInfo() {
+                const selectedOptions = Array.from(document.querySelectorAll('.property-option.selected'));
+                
+                let currentPrice = basePrice;
+                let currentQuantity = totalQuantity;
+                let isCombinationFound = false;
+
+                if (hasSkus && hasProperties && selectedOptions.length > 0) {
+                    const selectedIds = selectedOptions.map(option => parseInt(option.getAttribute('data-property-value-id'))).sort((a, b) => a - b);
+                    const allPropsSelected = selectedOptions.length === propertyGroups.length;
+
+                    if (allPropsSelected) {
+                        const matchingSku = skusData.find(sku => {
+                            const skuIdsString = sku.property_value_ids.sort((a, b) => a - b).join(',');
+                            const selectedIdsString = selectedIds.join(',');
+                            return skuIdsString === selectedIdsString;
                         });
-                        photoPreviewContainer.querySelector('.delete-photo-btn').addEventListener('click', async function() {
-                            const codeId = this.dataset.codeId;
-                            const photoPath = photoPreviewContainer.dataset.imagePath;
 
-                            if (confirm('هل أنت متأكد أنك تريد حذف هذه الصورة؟')) {
-                                try {
-                                    const formData = new FormData();
-                                    formData.append('action', 'delete_inspection_photo');
-                                    formData.append('photo_path', photoPath);
-                                    formData.append('code_id', codeId);
-                                    formData.append('inspection_id', currentInspectionId);
-
-                                    const response = await fetch('upload_inspection_image.php', {
-                                        method: 'POST',
-                                        body: formData
-                                    });
-                                    const data = await response.json();
-
-                                    if (data.success) {
-                                        showMessage('تم حذف الصورة بنجاح', true);
-                                        photoPreviewContainer.innerHTML = '';
-                                        photoPreviewContainer.dataset.imagePath = '';
-                                    } else {
-                                        showMessage('فشل حذف الصورة: ' + (data.message || 'خطأ غير معروف'), false);
-                                    }
-                                } catch (error) {
-                                    console.error('Error deleting photo:', error);
-                                    showMessage('حدث خطأ أثناء حذف الصورة', false);
+                        if (matchingSku) {
+                            currentPrice = basePrice + matchingSku.price_modifier;
+                            currentQuantity = matchingSku.quantity;
+                            isCombinationFound = true;
+                        } else {
+                            currentQuantity = 0; // Combination exists but is out of stock or not found
+                            isCombinationFound = false;
+                        }
+                    } else {
+                        // Not all properties selected, show filtered quantity or default
+                        const availableSkus = skusData.filter(sku => {
+                            let matches = true;
+                            selectedIds.forEach(id => {
+                                if (!sku.property_value_ids.includes(id)) {
+                                    matches = false;
                                 }
-                            }
-                        });
-                    } else {
-                        showMessage(`فشل رفع الصورة: ${result.message || 'خطأ غير معروف'}`, false);
-                    }
-                } catch (error) {
-                    console.error('Error uploading image:', error);
-                    showMessage('حدث خطأ أثناء رفع الصورة', false);
-                }
-            });
-            // Initial attachment of event listeners if photo already exists
-            if (viewPhotoBtn) {
-                viewPhotoBtn.addEventListener('click', function() {
-                    const photoPath = this.dataset.photoPath;
-                    window.open(photoPath, '_blank');
-                });
-            }
-            if (deletePhotoBtn) {
-                deletePhotoBtn.addEventListener('click', async function() {
-                    const codeId = this.dataset.codeId;
-                    const photoPath = photoPreviewContainer.dataset.imagePath; // Assuming dataset.imagePath is set correctly
-
-                    if (confirm('هل أنت متأكد أنك تريد حذف هذه الصورة؟')) {
-                        try {
-                            const formData = new FormData();
-                            formData.append('action', 'delete_inspection_photo');
-                            formData.append('photo_path', photoPath);
-                            formData.append('code_id', codeId);
-                            formData.append('inspection_id', currentInspectionId);
-
-                            const response = await fetch('upload_inspection_image.php', {
-                                method: 'POST',
-                                body: formData
                             });
-                            const data = await response.json();
-
-                            if (data.success) {
-                                showMessage('تم حذف الصورة بنجاح', true);
-                                photoPreviewContainer.innerHTML = '';
-                                photoPreviewContainer.dataset.imagePath = '';
-                            } else {
-                                showMessage('فشل حذف الصورة: ' + (data.message || 'خطأ غير معروف'), false);
-                            }
-                        } catch (error) {
-                            console.error('Error deleting photo:', error);
-                            showMessage('حدث خطأ أثناء حذف الصورة', false);
-                        }
+                            return matches;
+                        });
+                        
+                        currentQuantity = availableSkus.reduce((sum, sku) => sum + sku.quantity, 0);
+                        isCombinationFound = false;
                     }
-                });
-            }
-        }
-    }
-    function resizeImage(file, maxWidth, maxHeight) {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = (event) => {
-                const img = new Image();
-                img.src = event.target.result;
-                img.onload = () => {
-                    let width = img.width;
-                    let height = img.height;
+                } else if (!hasSkus || !hasProperties) {
+                    // No SKUs or no properties, use the main product quantity
+                    currentQuantity = totalQuantity;
+                    isCombinationFound = true; // Always considered found for simple products
+                }
 
-                    if (width > height) {
-                        if (width > maxWidth) {
-                            height *= maxWidth / width;
-                            width = maxWidth;
-                        }
-                    } else {
-                        if (height > maxHeight) {
-                            width *= maxHeight / height;
-                            height = maxHeight;
-                        }
-                        // This part seems to try to scale up smaller images,
-                        // but it might not be the desired behavior or might introduce blurriness.
-                        // Keeping it as per user provided code.
-                        if (width < maxWidth && height < maxHeight) {
-                            width = img.width;
-                            height = img.height;
-                        }
+                const priceWithTax = currentPrice * (1 + taxRate / 100);
+
+                priceElement.textContent = currentPrice.toFixed(2);
+                priceWithTaxElement.textContent = priceWithTax.toFixed(2);
+                quantityElement.textContent = currentQuantity;
+                
+                if (hasSkus && hasProperties) {
+                    const selectedIds = selectedOptions.map(option => parseInt(option.getAttribute('data-property-value-id')));
+                    selectedPropertiesInput.value = isCombinationFound ? selectedIds.join(',') : '';
+                    
+                    // تحديث حالة زر "أضف إلى السلة"
+                    addToCartButton.disabled = !isCombinationFound || currentQuantity <= 0;
+                } else {
+                    selectedPropertiesInput.value = '';
+                    addToCartButton.disabled = currentQuantity <= 0;
+                }
+                
+                // إضافة رسالة توضيحية عندما يكون الزر معطلاً
+                if (addToCartButton.disabled) {
+                    if (currentQuantity <= 0) {
+                        addToCartButton.title = "<?= htmlspecialchars($t['out_of_stock'] ?? 'Out of stock'); ?>";
+                    } else if (hasSkus && hasProperties && !isCombinationFound) {
+                        addToCartButton.title = "<?= htmlspecialchars($t['select_all_properties'] ?? 'Please select all properties'); ?>";
                     }
-                    const canvas = document.createElement('canvas');
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, width, height);
-                    canvas.toBlob((blob) => {
-                        resolve(blob);
-                    }, 'image/jpeg', 0.8);
-                };
-            };
-        });
-    }
-    function calculatePoints(category, condition) {
-        const rules = {
-            'Critical': { 'Condition I': 0, 'Condition II': 175, 'Condition III': 250, 'Condition IV': 300, 'Condition V': 400 },
-            'Major': { 'Condition I': 0, 'Condition II': 120, 'Condition III': 150, 'Condition IV': 200, 'Condition V': 250 },
-            'General': { 'Condition I': 0, 'Condition II': 50, 'Condition III': 75, 'Condition IV': 100, 'Condition V': 150 },
-            'Administrative': { 'Condition I': 0, 'Condition II': 0, 'Condition III': 0, 'Condition IV': 0, 'Condition V': 0 }
-        };
-
-        return rules[category]?.[condition] || 0;
-    }
-
-    saveItemsBtn.addEventListener('click', async function() {
-        if (!currentInspectionId) {
-            showMessage('لم يتم إنشاء التفتيش بعد', false);
-            return;
-        }
-
-        const itemsToSave = [];
-        const itemRows = document.querySelectorAll('.item-row');
-
-        itemRows.forEach(row => {
-            const codeId = row.querySelector('.is-violation-checkbox').dataset.codeId;
-            const isViolationCheckbox = row.querySelector('.is-violation-checkbox');
-            const isViolation = isViolationCheckbox.checked;
-
-            let actionTaken = 'لا يوجد إجراء';
-            let conditionLevel = 'N/A';
-            let deductedPoints = 0.00;
-            let violationValue = null;
-            let inspectorNotes = '';
-            let inspectionPhotoPath = '';
-
-            if (isViolation) {
-                const actionSelect = row.querySelector('.action-select');
-                actionTaken = actionSelect.value || 'غير محدد';
-
-                const pointsInput = row.querySelector('.points-input');
-                deductedPoints = parseFloat(pointsInput.value) || 0.00;
-                conditionLevel = pointsInput.dataset.conditionLevel || 'N/A';
-
-                const violationValueInput = row.querySelector('.violation-value-input');
-                violationValue = (actionTaken === 'مخالفة' && violationValueInput) ? parseFloat(violationValueInput.value) : null;
-
-                const notesInput = row.querySelector('.notes-input');
-                inspectorNotes = notesInput.value || '';
-
-                const photoPreviewContainer = row.querySelector('.photo-preview-container');
-                inspectionPhotoPath = photoPreviewContainer.dataset.imagePath || '';
+                } else {
+                    addToCartButton.title = "";
+                }
             }
 
-            if (isViolation && actionTaken !== 'لا يوجد إجراء') {
-                itemsToSave.push({
-                    code_id: codeId,
-                    is_violation: 1,
-                    action_taken: actionTaken,
-                    condition_level: conditionLevel,
-                    deducted_points: deductedPoints,
-                    violation_value: violationValue,
-                    inspector_notes: inspectorNotes,
-                    inspection_photo_path: inspectionPhotoPath
+            function filterAvailableOptions() {
+                if (!hasSkus || !hasProperties) return; // No filtering needed for simple products
+
+                const selectedOptions = Array.from(document.querySelectorAll('.property-option.selected'));
+                const selectedIds = selectedOptions.map(option => parseInt(option.getAttribute('data-property-value-id')));
+                
+                propertyGroups.forEach((group, index) => {
+                    const groupOptions = group.querySelectorAll('.property-option');
+                    
+                    const selectedInThisGroup = selectedOptions.find(opt => opt.closest('.property-group') === group);
+                    const otherSelectedIds = selectedIds.filter(id => id !== (selectedInThisGroup ? parseInt(selectedInThisGroup.getAttribute('data-property-value-id')) : null));
+
+                    groupOptions.forEach(option => {
+                        const optionId = parseInt(option.getAttribute('data-property-value-id'));
+                        
+                        // Check if this option is part of ANY valid SKU combination with other selected options
+                        const isValid = skusData.some(sku => {
+                            const isSelected = otherSelectedIds.every(id => sku.property_value_ids.includes(id));
+                            return isSelected && sku.property_value_ids.includes(optionId) && sku.quantity > 0;
+                        });
+
+                        if (isValid) {
+                            option.classList.remove('disabled');
+                        } else {
+                            option.classList.add('disabled');
+                        }
+                    });
                 });
+
+                updateProductInfo();
             }
-        });
 
-        const generalNotes = notesTextarea.value;
-        const inspectionType = inspectionTypeSelect.value;
-        const campaignName = campaignNameInput.value;
-        const inspectorId = inspectorIdInput.value;
-        const violationRefNo = violationRefNoInput.value;
-
-        try {
-            const formData = new FormData();
-            formData.append('action', 'save_inspection_items');
-            formData.append('inspection_id', currentInspectionId);
-            formData.append('items_data', JSON.stringify(itemsToSave));
-            formData.append('notes', generalNotes);
-            formData.append('inspection_type', inspectionType);
-            formData.append('campaign_name', campaignName);
-            formData.append('inspector_user_id', inspectorId);
-            formData.append('violation_ref_no', violationRefNo);
-            formData.append('updated_by_user_id', loggedInUserId);
-
-            const response = await fetch('api.php', {
-                method: 'POST',
-                body: formData
+            // إضافة مستمعي الأحداث لجميع أزرار الخصائص
+            propertyOptions.forEach(option => {
+                option.addEventListener('click', function() {
+                    const isSelected = this.classList.contains('selected');
+                    const parentGroup = this.closest('.property-group');
+                    
+                    // إزالة فئة 'selected' من جميع الخيارات في نفس المجموعة
+                    parentGroup.querySelectorAll('.property-option').forEach(opt => opt.classList.remove('selected'));
+                    
+                    if (!isSelected && !this.classList.contains('disabled')) {
+                        this.classList.add('selected');
+                    }
+                    
+                    filterAvailableOptions();
+                });
             });
 
-            const data = await response.json();
+            // Handle image gallery and lightbox
+            const mainImage = document.getElementById('main-product-image');
+            const lightbox = document.getElementById('imageLightbox');
+            const lightboxImage = document.getElementById('lightboxImage');
+            const closeBtn = document.querySelector('.close-lightbox');
 
-            if (data.success) {
-                resultDeducted.textContent = parseFloat(data.results.total_deducted_points || 0).toFixed(2);
-                resultScore.textContent = parseFloat(data.results.final_inspection_score || 0).toFixed(2);
-                resultPercentage.textContent = parseFloat(data.results.percentage_score || 0).toFixed(2) + '%';
-                resultGrade.textContent = data.results.letter_grade;
-                resultCard.textContent = data.results.color_card;
-                resultCritical.textContent = data.results.critical_violations || 0;
-                resultMajor.textContent = data.results.major_violations || 0;
-                resultGeneral.textContent = data.results.general_violations || 0;
-                resultAdministrative.textContent = data.results.administrative_violations || 0;
-                resultNextDate.textContent = data.results.next_inspection_date || 'غير محدد';
-                violationRefNoInput.value = data.results.violation_ref_no || '';
-                totalViolationValueInput.value = parseFloat(data.results.total_violation_value || 0).toFixed(2);
-                approvalStatusInput.value = data.results.approval_status || 'Pending';
-                approvedByInput.value = data.results.approved_by_username || '';
-                approvalDateInput.value = data.results.approval_date || '';
-                updatedByInput.value = data.results.updated_by_username || loggedInUserName;
-                resultNotes.value = generalNotes;
+            let currentImageIndex = 0;
+            const images = <?= json_encode($all_images); ?>;
 
-                if (parseFloat(data.results.total_violation_value || 0) > 5000) {
-                    totalViolationValueInput.classList.add('high-violation');
-                } else {
-                    totalViolationValueInput.classList.remove('high-violation');
+            function updateImage() {
+                if (images.length > 0) {
+                    mainImage.src = images[currentImageIndex];
                 }
+            }
 
-                itemsSection.style.display = 'none';
-                resultsSection.style.display = 'block';
+            document.getElementById('next-button')?.addEventListener('click', function(e) {
+                e.preventDefault();
+                currentImageIndex = (currentImageIndex + 1) % images.length;
+                updateImage();
+            });
 
-                showMessage('تم حفظ البنود وتحديث التفتيش بنجاح', true);
-                approveInspectionBtn.disabled = false;
-                editInspectionBtn.disabled = false;
+            document.getElementById('prev-button')?.addEventListener('click', function(e) {
+                e.preventDefault();
+                currentImageIndex = (currentImageIndex - 1 + images.length) % images.length;
+                updateImage();
+            });
+
+            // Lightbox
+            mainImage.addEventListener('click', function() {
+                lightbox.style.display = "block";
+                lightboxImage.src = this.src;
+            });
+
+            closeBtn.addEventListener('click', function() {
+                lightbox.style.display = "none";
+            });
+
+            window.addEventListener('click', function(event) {
+                if (event.target == lightbox) {
+                    lightbox.style.display = "none";
+                }
+            });
+
+            // Handle mobile menu
+            const mobileMenuBtn = document.getElementById('mobile-menu-button');
+            const mobileMenu = document.getElementById('mobile-menu');
+            const closeMenuBtn = document.getElementById('close-menu-button');
+            const dir = '<?= htmlspecialchars($dir); ?>';
+
+            mobileMenuBtn.addEventListener('click', () => {
+                mobileMenu.classList.remove(dir === 'rtl' ? 'translate-x-full' : '-translate-x-full');
+            });
+
+            closeMenuBtn.addEventListener('click', () => {
+                mobileMenu.classList.add(dir === 'rtl' ? 'translate-x-full' : '-translate-x-full');
+            });
+
+            if (hasProperties) {
+                filterAvailableOptions(); // Initial call to set up the options
             } else {
-                showMessage(data.message || 'فشل حفظ البنود', false);
+                updateProductInfo(); // Initial call for products without properties
             }
-        } catch (error) {
-            console.error('Error:', error);
-            showMessage('حدث خطأ أثناء حفظ البنود', false);
-        }
-    });
-
-    approveInspectionBtn.addEventListener('click', async function() {
-        if (!currentInspectionId) {
-            showMessage('لا يوجد تفتيش لاعتماده.', false);
-            return;
-        }
-
-        if (confirm('هل أنت متأكد أنك تريد اعتماد هذا التفتيش؟')) {
-            try {
-                const formData = new FormData();
-                formData.append('action', 'approve_inspection');
-                formData.append('inspection_id', currentInspectionId);
-                formData.append('approved_by_user_id', loggedInUserId);
-
-                const response = await fetch('api.php', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    approvalStatusInput.value = data.approval_status || 'Approved';
-                    approvedByInput.value = data.approved_by_username || loggedInUserName;
-                    approvalDateInput.value = data.approval_date || new Date().toISOString().slice(0,10);
-                    updatedByInput.value = data.updated_by_username || loggedInUserName;
-
-                    showMessage('تم اعتماد التفتيش بنجاح!', true);
-                } else {
-                    showMessage(data.message || 'فشل اعتماد التفتيش.', false);
-                }
-            } catch (error) {
-                console.error('Error approving inspection:', error);
-                showMessage('حدث خطأ أثناء اعتماد التفتيش.', false);
-            }
-        }
-    });
-
-    editInspectionBtn.addEventListener('click', function() {
-        if (!currentInspectionId) {
-            showMessage('لا يوجد تفتيش لتعديله.', false);
-            return;
-        }
-
-        resultsSection.style.display = 'none';
-        inspectionSection.style.display = 'block';
-        itemsSection.style.display = 'block';
-        showMessage('أصبح النموذج قابلاً للتعديل الآن.', true);
-    });
-
-    newInspectionBtn.addEventListener('click', resetFormVisibility);
-    newInspectionBtnResults.addEventListener('click', resetFormVisibility);
-
-    async function handleDeleteInspection() {
-        if (!currentInspectionId) {
-            showMessage('لا يوجد نموذج تفتيش لحذفه.', false);
-            return;
-        }
-
-        if (confirm('هل أنت متأكد أنك تريد حذف نموذج التفتيش هذا؟ سيؤدي هذا إلى حذف جميع البيانات المتعلقة بهذا التفتيش.')) {
-            try {
-                const formData = new FormData();
-                formData.append('action', 'delete_inspection');
-                formData.append('inspection_id', currentInspectionId);
-
-                const response = await fetch('api.php', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    showMessage('تم حذف النموذج بنجاح.', true);
-                    resetFormVisibility();
-                } else {
-                    showMessage(data.message || 'فشل حذف النموذج.', false);
-                }
-            } catch (error) {
-                console.error('Error deleting inspection:', error);
-                showMessage('حدث خطأ أثناء حذف النموذج.', false);
-            }
-        }
-    }
-
-    deleteInspectionBtn.addEventListener('click', handleDeleteInspection);
-    deleteInspectionBtnResults.addEventListener('click', handleDeleteInspection);
-
-    printReportBtn.addEventListener('click', function() {
-        if (!currentInspectionId) {
-            showMessage('لا يوجد تفتيش لطباعة تقرير له.', false);
-            return;
-        }
-
-        window.open(`generate_report.php?inspection_id=${currentInspectionId}`, '_blank');
-    });
-
-    emailReportBtn.addEventListener('click', async function() {
-        if (!currentInspectionId) {
-            showMessage('لا يوجد تفتيش لإرسال تقرير له.', false);
-            return;
-        }
-
-        const recipientEmail = establishmentEmailInput.value || '';
-        if (!recipientEmail) {
-            showMessage('لا يوجد بريد إلكتروني مسجل للمنشأة.', false);
-            return;
-        }
-
-        if (confirm(`هل تريد إرسال التقرير إلى ${recipientEmail}؟`)) {
-            try {
-                const formData = new FormData();
-                formData.append('action', 'email_report');
-                formData.append('inspection_id', currentInspectionId);
-                formData.append('recipient_email', recipientEmail);
-
-                showMessage('جارٍ إرسال التقرير...', true);
-
-                const response = await fetch('api.php', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    showMessage('تم إرسال التقرير بنجاح!', true);
-                } else {
-                    showMessage(`فشل إرسال التقرير: ${data.message || 'خطأ غير معروف'}`, false);
-                }
-            } catch (error) {
-                console.error('Error emailing report:', error);
-                showMessage('حدث خطأ أثناء إرسال التقرير.', false);
-            }
-        }
-    });
-
-    // Action Management Event Listeners
-    addActionBtn.addEventListener('click', function() {
-        openActionModal();
-    });
-
-    saveActionBtn.addEventListener('click', saveAction);
-    deleteActionBtn.addEventListener('click', deleteAction);
-    cancelActionBtn.addEventListener('click', closeActionModal);
-    closeModal.addEventListener('click', closeActionModal);
-
-    // Initialize the form
-    resetFormVisibility();
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const initialUniqueId = urlParams.get('unique_id');
-    const initialInspectionId = urlParams.get('inspection_id');
-
-    if (initialInspectionId) {
-        displayInspection(initialInspectionId);
-    } else if (initialUniqueId) {
-        licenseNoInput.value = initialUniqueId;
-        searchAndLoadInspection(initialUniqueId);
-    }
-});
-</script>
+        });
+    </script>
 </body>
 </html>
