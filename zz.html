@@ -1,12 +1,40 @@
-<?php
-// Display and security settings
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
+ <?php
 session_start();
 
-// استدعاء ملفات الاتصال بقاعدة البيانات والترجمات
-require_once __DIR__ . '/product_details_translations.php';
+// Load translations from external file
+require_once __DIR__ . '/translations.php';
+
+// تحديد اللغات المتاحة للعميل
+$available_langs = ['ar', 'en', 'hi', 'ur', 'ml', 'fa'];
+if (isset($_GET['lang']) && in_array($_GET['lang'], $available_langs)) {
+    $_SESSION['lang'] = $_GET['lang'];
+} elseif (!isset($_SESSION['lang'])) {
+    $_SESSION['lang'] = 'ar';
+}
+$lang = $_SESSION['lang'];
+$dir = ($lang === 'ar' || $lang === 'ur' || $lang === 'fa') ? 'rtl' : 'ltr';
+$t = $translations[$lang];
+
+// Set dynamic profile link
+$profile_link = '/platform/public/index.php'; // Default value
+
+if (isset($_SESSION['user_id']) && isset($_SESSION['role'])) {
+    switch ($_SESSION['role']) {
+        case 'customer':
+            $profile_link = '/platform/admin/edit_client.php';
+            break;
+        case 'vendor':
+            $profile_link = '/platform/vendor/vendor_dashboard.php';
+            break;
+        case 'third_party':
+            $profile_link = '/platform/third_party/third_party_prices.php';
+            break;
+        default:
+            $profile_link = '/platform/public/index.php';
+    }
+}
+
+// اتصال بقاعدة البيانات
 require_once __DIR__ . '/../database/db.php';
 $conn = connectDB();
 
@@ -14,992 +42,1718 @@ if ($conn === null) {
     die("خطأ في الاتصال بقاعدة البيانات. يرجى مراجعة ملف db.php.");
 }
 
-// Language and direction setup
-$available_langs = ['ar', 'en', 'hi', 'ur'];
-if (isset($_GET['lang']) && in_array($_GET['lang'], $available_langs)) {
-    $_SESSION['lang'] = $_GET['lang'];
-} elseif (!isset($_SESSION['lang'])) {
-    $_SESSION['lang'] = 'ar';
-}
-$lang = $_SESSION['lang'];
-$dir = ($lang === 'ar' || $lang === 'ur') ? 'rtl' : 'ltr';
-
-// Ensure $t is always an array, with 'en' as a fallback
-if (isset($translations[$lang])) {
-    $t = $translations[$lang];
-} elseif (isset($translations['en'])) {
-    $t = $translations['en'];
-} else {
-    $t = [];
-}
-
-// Set dynamic profile link
-$profile_link = '';
-if (isset($_SESSION['user_id'])) {
-    if ($_SESSION['role'] === 'customer') {
-        $profile_link = 'https://mzmz.wuaze.com/platform/admin/edit_client.php';
-    } elseif ($_SESSION['role'] === 'vendor') {
-        $profile_link = 'https://mzmz.wuaze.com/platform/vendor/vendor_dashboard.php';
-    } elseif ($_SESSION['role'] === 'third_party_service') {
-        $profile_link = 'https://mzmz.wuaze.com/platform/admin/edit_third_party.php';
+// Helper Functions
+function calculateDistance($lat1, $lon1, $lat2, $lon2) {
+    if (is_null($lat1) || is_null($lon1) || is_null($lat2) || is_null($lon2)) {
+        return null;
     }
+    $earthRadius = 6371;
+    $dLat = deg2rad($lat2 - $lat1);
+    $dLon = deg2rad($lon2 - $lon1);
+    $a = sin($dLat / 2) * sin($dLat / 2) + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLon / 2) * sin($dLon / 2);
+    $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+    return $earthRadius * $c;
 }
 
-// Helper functions
-function getVendorTransparencyAndGrade($complaint_count, $average_rating, $lang) {
-    global $t;
+function getVendorGradeAndColor($complaint_count) {
     $complaint_count = (int)$complaint_count;
-    $average_rating = (float)$average_rating;
-    $grade = '';
-    $color = '';
-    $description = '';
-
     if ($complaint_count == 0) {
-        if ($average_rating >= 4.5) {
-            $grade = $t['grade_a_plus'] ?? 'A+';
-            $description = $t['grade_excellent'] ?? 'Excellent';
-            $color = 'bg-green-600 text-white';
-        } elseif ($average_rating >= 3.5) {
-            $grade = $t['grade_a'] ?? 'A';
-            $description = $t['grade_very_good'] ?? 'Very Good';
-            $color = 'bg-green-500 text-white';
-        } else {
-            $grade = $t['grade_b'] ?? 'B';
-            $description = $t['grade_good'] ?? 'Good';
-            $color = 'bg-yellow-500 text-white';
-        }
+        return ['grade' => 'A+', 'color' => 'emerald-500'];
     } elseif ($complaint_count <= 2) {
-        if ($average_rating >= 4.0) {
-            $grade = $t['grade_a'] ?? 'A';
-            $description = $t['grade_very_good'] ?? 'Very Good';
-            $color = 'bg-green-500 text-white';
-        } elseif ($average_rating >= 2.5) {
-            $grade = $t['grade_b'] ?? 'B';
-            $description = $t['grade_good'] ?? 'Good';
-            $color = 'bg-yellow-500 text-white';
-        } else {
-            $grade = $t['grade_c'] ?? 'C';
-            $description = $t['grade_fair'] ?? 'Fair';
-            $color = 'bg-orange-500 text-white';
-        }
+        return ['grade' => 'B', 'color' => 'lime-500'];
     } elseif ($complaint_count <= 5) {
-        if ($average_rating >= 3.0) {
-            $grade = $t['grade_b'] ?? 'B';
-            $description = $t['grade_good'] ?? 'Good';
-            $color = 'bg-yellow-500 text-white';
-        } else {
-            $grade = $t['grade_c'] ?? 'C';
-            $description = $t['grade_fair'] ?? 'Fair';
-            $color = 'bg-orange-500 text-white';
-        }
+        return ['grade' => 'C', 'color' => 'yellow-500'];
     } elseif ($complaint_count <= 10) {
-        $grade = $t['grade_d'] ?? 'D';
-        $description = $t['grade_poor'] ?? 'Poor';
-        $color = 'bg-red-500 text-white';
-    } else { // complaint_count > 10
-        $grade = $t['grade_e'] ?? 'E';
-        $description = $t['grade_very_poor'] ?? 'Very Poor';
-        $color = 'bg-red-800 text-white';
+        return ['grade' => 'D', 'color' => 'orange-500'];
+    } else {
+        return ['grade' => 'E', 'color' => 'red-500'];
     }
-    return ['grade' => $grade, 'description' => $description, 'color' => $color];
 }
 
-// --------------------------------------------------------
-// Fetch product details
-// --------------------------------------------------------
-$product_id = $_GET['id'] ?? null;
-if (!$product_id) {
-    die("خطأ: لم يتم تحديد معرف المنتج.");
+function renderStarRating($rating) {
+    $fullStars = floor($rating);
+    $halfStar = ($rating - $fullStars) >= 0.5 ? 1 : 0;
+    $emptyStars = 5 - $fullStars - $halfStar;
+
+    $html = '';
+    for ($i = 0; $i < $fullStars; $i++) {
+        $html .= '<i class="fas fa-star text-yellow-500"></i>';
+    }
+    if ($halfStar) {
+        $html .= '<i class="fas fa-star-half-alt text-yellow-500"></i>';
+    }
+    for ($i = 0; $i < $emptyStars; $i++) {
+        $html .= '<i class="far fa-star text-yellow-500"></i>';
+    }
+    return $html;
 }
 
-$sql_product = "
+// جلب الإعلانات
+$ads = [];
+$current_date = date('Y-m-d');
+$sql_ads = "
+    SELECT id, title, description, image_url, target_url, media_type, clicks, impressions, vendor_id
+    FROM advertisements
+    WHERE status = 'active' AND start_date <= ? AND end_date >= ?
+    ORDER BY priority DESC, created_at DESC
+";
+$stmt_ads = $conn->prepare($sql_ads);
+if ($stmt_ads) {
+    $stmt_ads->bind_param("ss", $current_date, $current_date);
+    $stmt_ads->execute();
+    $result_ads = $stmt_ads->get_result();
+    while ($row = $result_ads->fetch_assoc()) {
+        $row['image_url'] = '/platform/uploads/advertisements/' . basename($row['image_url']);
+        $ads[] = $row;
+    }
+    $stmt_ads->close();
+}
+
+// جلب الفئات
+$categories = [];
+$sql_categories = "SELECT id, name_ar, name_en, image_url FROM product_categories";
+$result_categories = $conn->query($sql_categories);
+if ($result_categories && $result_categories->num_rows > 0) {
+    while ($row = $result_categories->fetch_assoc()) {
+        $categories[] = $row;
+    }
+}
+
+// جلب المنتجات (الاستعلامات المعدلة)
+$filter_clauses = [];
+$params = [];
+$param_types = '';
+
+if (isset($_GET['search']) && !empty($_GET['search'])) {
+    $search_term = '%' . $_GET['search'] . '%';
+    $filter_clauses[] = "(p.product_name LIKE ? OR v.vendor_name LIKE ? OR v.address LIKE ?)";
+    $params[] = $search_term;
+    $params[] = $search_term;
+    $params[] = $search_term;
+    $param_types .= 'sss';
+}
+
+if (isset($_GET['min_price']) && is_numeric($_GET['min_price'])) {
+    $filter_clauses[] = "p.discount_price >= ?";
+    $params[] = $_GET['min_price'];
+    $param_types .= 'd';
+}
+
+if (isset($_GET['max_price']) && is_numeric($_GET['max_price'])) {
+    $filter_clauses[] = "p.discount_price <= ?";
+    $params[] = $_GET['max_price'];
+    $param_types .= 'd';
+}
+
+if (isset($_GET['category']) && is_array($_GET['category']) && !empty($_GET['category'])) {
+    $placeholders = implode(',', array_fill(0, count($_GET['category']), '?'));
+    $filter_clauses[] = "p.product_category_id IN ($placeholders)";
+    foreach ($_GET['category'] as $cat) {
+        $params[] = $cat;
+        $param_types .= 'i';
+    }
+}
+
+$current_vendor_filter = isset($_GET['vendor']) && is_array($_GET['vendor']) && !empty($_GET['vendor']) ? $_GET['vendor'] : [];
+
+if (!empty($current_vendor_filter)) {
+    $placeholders = implode(',', array_fill(0, count($current_vendor_filter), '?'));
+    $filter_clauses[] = "p.vendor_id IN ($placeholders)";
+    foreach ($current_vendor_filter as $vendor) {
+        $params[] = $vendor;
+        $param_types .= 'i';
+    }
+}
+
+if (isset($_GET['city']) && !empty($_GET['city'])) {
+    $filter_clauses[] = "u_vendor.city_id = ?";
+    $params[] = $_GET['city'];
+    $param_types .= 'i';
+}
+
+if (isset($_GET['country']) && !empty($_GET['country'])) {
+    $filter_clauses[] = "u_vendor.country_id = ?";
+    $params[] = $_GET['country'];
+    $param_types .= 'i';
+}
+
+if (isset($_GET['address']) && !empty($_GET['address'])) {
+    $address_term = '%' . $_GET['address'] . '%';
+    $filter_clauses[] = "v.address LIKE ?";
+    $params[] = $address_term;
+    $param_types .= 's';
+}
+
+$where_clause = "WHERE p.is_active = 1" . (!empty($filter_clauses) ? ' AND ' . implode(' AND ', $filter_clauses) : '');
+
+// 1. أحدث العروض
+$sql_latest_offers = "
     SELECT
-        p.id, p.product_name, p.price, p.original_price, p.discount_price, p.unit, p.brand, p.description, p.shipping_type, p.tax_rate, p.quantity,
-        v.id AS vendor_id, v.vendor_name,
-        COALESCE(SUM(oi.quantity), 0) AS total_sales,
-        (SELECT COUNT(*) FROM complaints WHERE complaint_against_vendor_id = v.id) AS vendor_complaint_count,
-        COALESCE(AVG(vr.rating), 0) AS average_rating,
-        COUNT(DISTINCT vr.id) AS total_ratings
+        p.id, p.product_name, p.discount_price, p.original_price, p.unit, p.quantity, p.created_at, p.brand,
+        v.id AS vendor_id, v.vendor_name, v.user_id AS vendor_user_id, v.address AS vendor_address,
+        GROUP_CONCAT(pi.image_url ORDER BY pi.id ASC) AS images,
+        u_vendor.latitude AS vendor_lat, u_vendor.longitude AS vendor_lon,
+        pc.name_ar AS category_name_ar, pc.name_en AS category_name_en,
+        COALESCE(pa.viewed, 0) AS viewed_count, COALESCE(pa.clicked, 0) AS clicked_count,
+        COUNT(DISTINCT vr.user_id) AS total_ratings,
+        COALESCE(AVG(vr.rating), 0) AS avg_rating,
+        COALESCE(SUM(oi.quantity), 0) AS total_sales
     FROM products p
     JOIN vendors v ON p.vendor_id = v.id
+    LEFT JOIN product_images pi ON p.id = pi.product_id
+    LEFT JOIN users u_vendor ON v.user_id = u_vendor.id
+    LEFT JOIN product_categories pc ON p.product_category_id = pc.id
+    LEFT JOIN vendor_reviews vr ON v.id = vr.vendor_id
     LEFT JOIN order_items oi ON p.id = oi.product_id
-    LEFT JOIN vendor_reviews vr ON p.id = vr.product_id
-    WHERE p.id = ?
+    LEFT JOIN product_analytics pa ON p.id = pa.product_id
+    $where_clause AND p.original_price > p.discount_price
     GROUP BY p.id
+    ORDER BY p.created_at DESC
+    LIMIT 10
 ";
 
-$stmt_product = $conn->prepare($sql_product);
-if (!$stmt_product) {
-    die("خطأ في تهيئة الاستعلام: " . $conn->error);
-}
-$stmt_product->bind_param("i", $product_id);
-$stmt_product->execute();
-$result_product = $stmt_product->get_result();
-$product = $result_product->fetch_assoc();
-$stmt_product->close();
-
-if (!$product) {
-    die("خطأ: المنتج غير موجود.");
-}
-
-// Check for valid discount and calculate percentage
-$original_price = (float) $product['original_price'];
-$discount_price = (float) $product['discount_price'];
-$tax_rate = (float) ($product['tax_rate'] ?? 0);
-$discount_percentage = 0;
-if ($original_price > 0 && $discount_price > 0 && $discount_price < $original_price) {
-    $discount_percentage = round((($original_price - $discount_price) / $original_price) * 100);
-}
-
-$base_price = $discount_price > 0 ? $discount_price : $original_price;
-
-// --------------------------------------------------------
-// Fetch product quantity (New Logic)
-// --------------------------------------------------------
-$total_quantity = 0;
-$has_skus = false;
-
-// Check if the product has SKUs
-$sql_check_skus = "SELECT COUNT(*) as count FROM product_skus WHERE product_id = ?";
-$stmt_check_skus = $conn->prepare($sql_check_skus);
-if ($stmt_check_skus) {
-    $stmt_check_skus->bind_param("i", $product_id);
-    $stmt_check_skus->execute();
-    $result_check_skus = $stmt_check_skus->get_result();
-    $row_skus = $result_check_skus->fetch_assoc();
-    $has_skus = ($row_skus['count'] > 0);
-    $stmt_check_skus->close();
-}
-
-if ($has_skus) {
-    // If there are SKUs, sum their quantities
-    $sql_total_quantity = "
-        SELECT COALESCE(SUM(quantity), 0) as total_quantity
-        FROM product_skus
-        WHERE product_id = ?
-    ";
-    $stmt_total_quantity = $conn->prepare($sql_total_quantity);
-    if ($stmt_total_quantity) {
-        $stmt_total_quantity->bind_param("i", $product_id);
-        $stmt_total_quantity->execute();
-        $result_total_quantity = $stmt_total_quantity->get_result();
-        $row = $result_total_quantity->fetch_assoc();
-        $total_quantity = (int) $row['total_quantity'];
-        $stmt_total_quantity->close();
+$stmt_latest_offers = $conn->prepare($sql_latest_offers);
+$latest_offers = [];
+if ($stmt_latest_offers) {
+    if ($param_types) {
+        $stmt_latest_offers->bind_param($param_types, ...$params);
     }
-} else {
-    // If no SKUs, use the quantity from the main products table
-    $total_quantity = (int) ($product['quantity'] ?? 0);
-}
-
-// --------------------------------------------------------
-// Fetch product images
-// --------------------------------------------------------
-$all_images = ['https://mzmz.wuaze.com/platform/assets/placeholder.jpg'];
-$sql_images = "SELECT image_url FROM product_images WHERE product_id = ? ORDER BY id ASC";
-$stmt_images = $conn->prepare($sql_images);
-if ($stmt_images) {
-    $stmt_images->bind_param("i", $product_id);
-    $stmt_images->execute();
-    $result_images = $stmt_images->get_result();
-    $fetched_images = [];
-    while ($image_row = $result_images->fetch_assoc()) {
-        $image_url = $image_row['image_url'];
-        // Ensure path is correct, trim leading slashes if they exist
-        $image_url = ltrim($image_url, '/');
-        $fetched_images[] = 'https://mzmz.wuaze.com/platform/' . $image_url;
-    }
-    if (!empty($fetched_images)) {
-        $all_images = $fetched_images;
-    }
-    $stmt_images->close();
-}
-
-// --------------------------------------------------------
-// Fetch product properties and SKUs (Variants)
-// --------------------------------------------------------
-$product_properties = [];
-$sql_props_all = "
-    SELECT 
-        pn.id AS name_id, 
-        pn.name_$lang AS property_name, 
-        GROUP_CONCAT(
-            CONCAT(
-                pv.id, ':', pv.value_$lang
-            ) SEPARATOR '|'
-        ) AS values_data
-    FROM product_properties pp
-    JOIN property_names pn ON pp.property_name_id = pn.id
-    JOIN property_values pv ON pp.property_value_id = pv.id
-    WHERE pp.product_id = ?
-    GROUP BY pn.id, pn.name_$lang
-";
-$stmt_props_all = $conn->prepare($sql_props_all);
-if ($stmt_props_all) {
-    $stmt_props_all->bind_param("i", $product_id);
-    $stmt_props_all->execute();
-    $result_props_all = $stmt_props_all->get_result();
-    while ($prop_row = $result_props_all->fetch_assoc()) {
-        $prop_values = [];
-        $values = explode('|', $prop_row['values_data']);
-        foreach ($values as $value) {
-            list($id, $val) = explode(':', $value);
-            $prop_values[] = [
-                'id' => (int)$id, // Ensure ID is an integer
-                'value' => $val,
-            ];
+    $stmt_latest_offers->execute();
+    $result_latest_offers = $stmt_latest_offers->get_result();
+    while ($row = $result_latest_offers->fetch_assoc()) {
+        $all_images = [];
+        if ($row['images']) {
+            $all_images = explode(',', $row['images']);
         }
-        $product_properties[] = [
-            'name_id' => $prop_row['name_id'],
-            'name' => $prop_row['property_name'],
-            'values' => $prop_values,
-        ];
+        $row['images'] = $all_images;
+        $latest_offers[] = $row;
     }
-    $stmt_props_all->close();
+    $stmt_latest_offers->close();
 }
 
-// Fetch all SKUs data for this product
-$skus_data = [];
-if ($has_skus) {
-    $sql_skus = "
-        SELECT 
-            ps.id, ps.price_modifier, ps.quantity, 
-            GROUP_CONCAT(sp.property_value_id ORDER BY sp.property_value_id) AS property_value_ids_string
-        FROM product_skus ps
-        JOIN sku_properties sp ON ps.id = sp.sku_id
-        WHERE ps.product_id = ?
-        GROUP BY ps.id
-    ";
-    $stmt_skus = $conn->prepare($sql_skus);
-    if ($stmt_skus) {
-        $stmt_skus->bind_param("i", $product_id);
-        $stmt_skus->execute();
-        $result_skus = $stmt_skus->get_result();
-        while ($sku_row = $result_skus->fetch_assoc()) {
-            $skus_data[] = [
-                'price_modifier' => (float)$sku_row['price_modifier'],
-                'quantity' => (int)$sku_row['quantity'],
-                // Convert comma-separated string to a sorted array
-                'property_value_ids' => array_map('intval', explode(',', $sku_row['property_value_ids_string']))
-            ];
-        }
-        $stmt_skus->close();
-    }
-}
-
-// --------------------------------------------------------
-// Fetch Vendor Shipping (Corrected query)
-// --------------------------------------------------------
-$shipping_status = $t['shipping_not_available'] ?? 'Shipping information not available.';
-$sql_shipping = "
+// 2. الأفضل مبيعًا
+$sql_best_sellers = "
     SELECT
-        vs.price,
-        vs.free_shipping_threshold,
-        ct.name AS city_name
-    FROM vendor_shipping vs
-    JOIN cities c ON vs.city_id = c.id
-    JOIN city_translations ct ON c.id = ct.city_id
-    WHERE vs.vendor_id = ? AND vs.is_active = 1 AND ct.language_code = ?
+        p.id, p.product_name, p.discount_price, p.original_price, p.unit, p.quantity, p.created_at, p.brand,
+        v.id AS vendor_id, v.vendor_name, v.user_id AS vendor_user_id, v.address AS vendor_address,
+        GROUP_CONCAT(pi.image_url ORDER BY pi.id ASC) AS images,
+        u_vendor.latitude AS vendor_lat, u_vendor.longitude AS vendor_lon,
+        pc.name_ar AS category_name_ar, pc.name_en AS category_name_en,
+        COALESCE(pa.viewed, 0) AS viewed_count, COALESCE(pa.clicked, 0) AS clicked_count,
+        COUNT(DISTINCT vr.user_id) AS total_ratings,
+        COALESCE(AVG(vr.rating), 0) AS avg_rating,
+        COALESCE(SUM(oi.quantity), 0) AS total_sales
+    FROM products p
+    JOIN vendors v ON p.vendor_id = v.id
+    LEFT JOIN product_images pi ON p.id = pi.product_id
+    LEFT JOIN users u_vendor ON v.user_id = u_vendor.id
+    LEFT JOIN product_categories pc ON p.product_category_id = pc.id
+    LEFT JOIN vendor_reviews vr ON v.id = vr.vendor_id
+    LEFT JOIN order_items oi ON p.id = oi.product_id
+    LEFT JOIN product_analytics pa ON p.id = pa.product_id
+    $where_clause
+    GROUP BY p.id
+    ORDER BY total_sales DESC
+    LIMIT 10
 ";
-$stmt_shipping = $conn->prepare($sql_shipping);
-if ($stmt_shipping) {
-    $stmt_shipping->bind_param("is", $product['vendor_id'], $lang);
-    $stmt_shipping->execute();
-    $result_shipping = $stmt_shipping->get_result();
 
-    $shipping_info = [];
-    while ($row = $result_shipping->fetch_assoc()) {
-        $shipping_info[] = $row;
+$stmt_best_sellers = $conn->prepare($sql_best_sellers);
+$best_sellers = [];
+if ($stmt_best_sellers) {
+    if ($param_types) {
+        $stmt_best_sellers->bind_param($param_types, ...$params);
     }
-    $stmt_shipping->close();
-
-    if (!empty($shipping_info)) {
-        $free_shipping_cities = [];
-        $paid_shipping_cities = [];
-
-        foreach ($shipping_info as $info) {
-            $cityName = htmlspecialchars($info['city_name'] ?? '');
-            $isFree = ($base_price >= $info['free_shipping_threshold']);
-
-            if ($isFree) {
-                $free_shipping_cities[] = $cityName;
-            } else {
-                $paid_shipping_cities[] = ['city' => $cityName, 'price' => $info['price']];
-            }
+    $stmt_best_sellers->execute();
+    $result_best_sellers = $stmt_best_sellers->get_result();
+    while ($row = $result_best_sellers->fetch_assoc()) {
+        $all_images = [];
+        if ($row['images']) {
+            $all_images = explode(',', $row['images']);
         }
-
-        $shipping_lines = [];
-        if (!empty($free_shipping_cities)) {
-            $shipping_lines[] = htmlspecialchars($t['free_shipping_to'] ?? 'Free Shipping to') . ': ' . implode(', ', $free_shipping_cities);
-        }
-        if (!empty($paid_shipping_cities)) {
-            foreach ($paid_shipping_cities as $paid_city) {
-                $shipping_lines[] = htmlspecialchars($t['shipping_to'] ?? 'Shipping to') . ' ' . $paid_city['city'] . ': ' . number_format($paid_city['price'], 2) . ' ' . htmlspecialchars($t['currency'] ?? 'AED');
-            }
-        }
-        $shipping_status = implode('<br>', $shipping_lines);
+        $row['images'] = $all_images;
+        $best_sellers[] = $row;
     }
+    $stmt_best_sellers->close();
 }
 
-// --------------------------------------------------------
-// Fetch active product offers (New)
-// --------------------------------------------------------
-$offers = [];
-$sql_offers = "
-    SELECT offer_type, offer_value, buy_quantity, get_quantity
-    FROM product_offers
-    WHERE product_id = ? AND is_active = 1 AND end_date > NOW()
-";
-$stmt_offers = $conn->prepare($sql_offers);
-if ($stmt_offers) {
-    $stmt_offers->bind_param("i", $product_id);
-    $stmt_offers->execute();
-    $result_offers = $stmt_offers->get_result();
-    while ($row = $result_offers->fetch_assoc()) {
-        $offers[] = $row;
-    }
-    $stmt_offers->close();
-}
-
-
-// --------------------------------------------------------
-// Fetch Product Analytics
-// --------------------------------------------------------
-$product_analytics = ['total_views' => 0, 'total_clicks' => 0, 'total_wishlists' => 0];
-$sql_analytics = "
+// 3. العروض الترحيبية
+$sql_welcome_offers = "
     SELECT
-        COALESCE(SUM(viewed), 0) AS total_views,
-        COALESCE(SUM(clicked), 0) AS total_clicks,
-        COALESCE(SUM(wishlisted), 0) AS total_wishlists
-    FROM product_analytics
-    WHERE product_id = ?
+        p.id, p.product_name, p.discount_price, p.original_price, p.unit, p.quantity, p.created_at, p.brand,
+        v.id AS vendor_id, v.vendor_name, v.user_id AS vendor_user_id, v.address AS vendor_address,
+        GROUP_CONCAT(pi.image_url ORDER BY pi.id ASC) AS images,
+        u_vendor.latitude AS vendor_lat, u_vendor.longitude AS vendor_lon,
+        pc.name_ar AS category_name_ar, pc.name_en AS category_name_en,
+        COALESCE(pa.viewed, 0) AS viewed_count, COALESCE(pa.clicked, 0) AS clicked_count,
+        COUNT(DISTINCT vr.user_id) AS total_ratings,
+        COALESCE(AVG(vr.rating), 0) AS avg_rating,
+        COALESCE(SUM(oi.quantity), 0) AS total_sales
+    FROM products p
+    JOIN vendors v ON p.vendor_id = v.id
+    LEFT JOIN product_images pi ON p.id = pi.product_id
+    LEFT JOIN users u_vendor ON v.user_id = u_vendor.id
+    LEFT JOIN product_categories pc ON p.product_category_id = pc.id
+    LEFT JOIN vendor_reviews vr ON v.id = vr.vendor_id
+    LEFT JOIN order_items oi ON p.id = oi.product_id
+    LEFT JOIN product_analytics pa ON p.id = pa.product_id
+    $where_clause
+    GROUP BY p.id
+    ORDER BY p.discount_price ASC
+    LIMIT 10
 ";
-$stmt_analytics = $conn->prepare($sql_analytics);
-if ($stmt_analytics) {
-    $stmt_analytics->bind_param("i", $product_id);
-    $stmt_analytics->execute();
-    $result_analytics = $stmt_analytics->get_result();
-    if ($result_analytics->num_rows > 0) {
-        $product_analytics = $result_analytics->fetch_assoc();
+
+$stmt_welcome_offers = $conn->prepare($sql_welcome_offers);
+$welcome_offers = [];
+if ($stmt_welcome_offers) {
+    if ($param_types) {
+        $stmt_welcome_offers->bind_param($param_types, ...$params);
     }
-    $stmt_analytics->close();
+    $stmt_welcome_offers->execute();
+    $result_welcome_offers = $stmt_welcome_offers->get_result();
+    while ($row = $result_welcome_offers->fetch_assoc()) {
+        $all_images = [];
+        if ($row['images']) {
+            $all_images = explode(',', $row['images']);
+        }
+        $row['images'] = $all_images;
+        $welcome_offers[] = $row;
+    }
+    $stmt_welcome_offers->close();
 }
 
-// --------------------------------------------------------
-// Fetch complaints against the product/vendor
-// --------------------------------------------------------
-$product_complaints = [];
-$sql_complaints = "
-    SELECT c.complaint_by_user_id, c.complaint_text, c.complaint_status, c.complaint_date, u.username AS user_name
-    FROM complaints c
-    JOIN users u ON c.complaint_by_user_id = u.id
-    WHERE c.complaint_against_vendor_id = ? AND c.order_id IN (
-        SELECT order_id FROM order_items WHERE product_id = ?
-    )
+// جلب المزادات النشطة (تم تحديث الاستعلام)
+$active_auctions = [];
+$sql_auctions = "
+    SELECT a.id, a.title, a.start_price, a.start_time, a.end_time, am.file_path, am.media_type
+    FROM auctions a
+    LEFT JOIN auction_media am ON a.id = am.auction_id
+    WHERE a.status = 'active'
+    GROUP BY a.id
+    ORDER BY a.start_time DESC
 ";
-$stmt_complaints = $conn->prepare($sql_complaints);
-if ($stmt_complaints) {
-    $stmt_complaints->bind_param("ii", $product['vendor_id'], $product_id);
-    $stmt_complaints->execute();
-    $result_complaints = $stmt_complaints->get_result();
-    while ($row = $result_complaints->fetch_assoc()) {
-        $product_complaints[] = $row;
+$result_auctions = $conn->query($sql_auctions);
+if ($result_auctions && $result_auctions->num_rows > 0) {
+    while ($row = $result_auctions->fetch_assoc()) {
+        $active_auctions[] = $row;
     }
-    $stmt_complaints->close();
 }
 
-// --------------------------------------------------------
-// Fetch Star Rating Counts and comments from vendor_reviews
-// --------------------------------------------------------
-$star_ratings = [5 => 0, 4 => 0, 3 => 0, 2 => 0, 1 => 0];
-$reviews_by_star = [5 => [], 4 => [], 3 => [], 2 => [], 1 => []];
-$sql_reviews = "
-    SELECT vr.id, vr.rating, vr.comment, u.username AS user_name, vr.review_date
-    FROM vendor_reviews vr
-    JOIN users u ON vr.user_id = u.id
-    WHERE vr.product_id = ?
-    ORDER BY vr.rating DESC, vr.review_date DESC
+// جلب قائمة التجار مع عدد منتجاتهم
+$vendors = [];
+$sql_vendors = "
+    SELECT v.id, v.vendor_name, v.logo, COUNT(p.id) AS product_count
+    FROM vendors v
+    LEFT JOIN products p ON v.id = p.vendor_id
+    GROUP BY v.id, v.vendor_name, v.logo
+    ORDER BY v.vendor_name ASC
 ";
-$stmt_reviews = $conn->prepare($sql_reviews);
-if ($stmt_reviews) {
-    $stmt_reviews->bind_param("i", $product_id);
-    $stmt_reviews->execute();
-    $result_reviews = $stmt_reviews->get_result();
-    while ($row = $result_reviews->fetch_assoc()) {
-        $rating = (int)$row['rating'];
-        if (isset($reviews_by_star[$rating])) {
-            $reviews_by_star[$rating][] = $row;
-            $star_ratings[$rating]++;
+$result_vendors = $conn->query($sql_vendors);
+if ($result_vendors && $result_vendors->num_rows > 0) {
+    while ($row = $result_vendors->fetch_assoc()) {
+        $vendors[] = $row;
+    }
+}
+
+// جلب الفيديوهات والصور من جدول vendor_media
+$vendor_media = [];
+$sql_media = "
+    SELECT
+        vm.id, vm.media_type, vm.media_url, vm.uploaded_at, v.vendor_name
+    FROM vendor_media vm
+    JOIN vendors v ON vm.vendor_id = v.id
+    ORDER BY vm.uploaded_at DESC
+    LIMIT 10
+";
+$result_media = $conn->query($sql_media);
+if ($result_media && $result_media->num_rows > 0) {
+    while ($row = $result_media->fetch_assoc()) {
+        $row['media_url'] = '/platform/uploads/vendor_media/' . basename($row['media_url']);
+        $vendor_media[] = $row;
+    }
+}
+
+// جلب الشكاوى
+$vendor_ids = array_merge(
+    array_column($latest_offers, 'vendor_id'),
+    array_column($best_sellers, 'vendor_id'),
+    array_column($welcome_offers, 'vendor_id')
+);
+$vendor_complaints = [];
+if (!empty($vendor_ids)) {
+    $vendor_ids_str = implode(',', array_unique($vendor_ids));
+    $sql_complaints = "
+        SELECT complaint_against_vendor_id, COUNT(*) AS complaint_count
+        FROM complaints
+        WHERE complaint_against_vendor_id IN ($vendor_ids_str)
+        AND complaint_status IN ('open', 'in_progress')
+        GROUP BY complaint_against_vendor_id
+    ";
+    $result_complaints = $conn->query($sql_complaints);
+    if ($result_complaints) {
+        while ($row = $result_complaints->fetch_assoc()) {
+            $vendor_complaints[$row['complaint_against_vendor_id']] = $row['complaint_count'];
         }
     }
-    $stmt_reviews->close();
+}
+
+// جلب الدول والمدن
+$countries = [];
+$cities = [];
+$sql_countries = "SELECT c.id, ct.name FROM countries c JOIN country_translations ct ON c.id = ct.country_id WHERE ct.language_code = ?";
+$stmt_countries = $conn->prepare($sql_countries);
+if ($stmt_countries) {
+    $stmt_countries->bind_param("s", $lang);
+    $stmt_countries->execute();
+    $result_countries = $stmt_countries->get_result();
+    while ($row = $result_countries->fetch_assoc()) {
+        $countries[] = $row;
+    }
+    $stmt_countries->close();
+}
+
+$sql_cities = "SELECT ci.id, cit.name FROM cities ci JOIN city_translations cit ON ci.id = cit.city_id WHERE cit.language_code = ?";
+$stmt_cities = $conn->prepare($sql_cities);
+if ($stmt_cities) {
+    $stmt_cities->bind_param("s", $lang);
+    $stmt_cities->execute();
+    $result_cities = $stmt_cities->get_result();
+    while ($row = $result_cities->fetch_assoc()) {
+        $cities[] = $row;
+    }
+    $stmt_cities->close();
+}
+
+// جلب المجموعات
+$groups = [];
+$sql_groups = "SELECT group_id, group_name, group_image FROM groups WHERE status = 'active'";
+$result_groups = $conn->query($sql_groups);
+if ($result_groups && $result_groups->num_rows > 0) {
+    while ($row = $result_groups->fetch_assoc()) {
+        $groups[] = $row;
+    }
+}
+
+// جلب الوظائف
+$jobs = [];
+$sql_jobs = "
+    SELECT j.job_id, j.job_title, j.job_type, j.location, j.salary_range, j.created_at, 
+           c.category_name_ar, c.category_name_en
+    FROM jobs j
+    LEFT JOIN job_categories c ON j.category_id = c.category_id
+    WHERE j.status = 'open' AND j.is_active = 1
+    ORDER BY j.created_at DESC
+    LIMIT 6
+";
+$result_jobs = $conn->query($sql_jobs);
+if ($result_jobs && $result_jobs->num_rows > 0) {
+    while ($row = $result_jobs->fetch_assoc()) {
+        $jobs[] = $row;
+    }
 }
 
 $conn->close();
-
-$vendor_transparency = getVendorTransparencyAndGrade($product['vendor_complaint_count'] ?? 0, $product['average_rating'] ?? 0, $lang);
-
 ?>
 
 <!DOCTYPE html>
 <html lang="<?= htmlspecialchars($lang); ?>" dir="<?= htmlspecialchars($dir); ?>">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= htmlspecialchars($t['product_details'] ?? 'تفاصيل المنتج'); ?></title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title><?= $t['page_title'] ?></title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&family=Noto+Sans+Arabic:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/swiper@8.4.7/swiper-bundle.min.css" />
     <style>
-        body { font-family: 'Roboto', 'Noto Sans Arabic', sans-serif; }
-        .grade-badge { font-size: 0.875rem; line-height: 1.25rem; padding: 0.25rem 0.75rem; z-index: 10; }
-        .main-image-container { position: relative; height: 400px; width: 100%; cursor: pointer; }
-        .main-image { object-fit: contain; width: 100%; height: 100%; }
-        .image-nav-button { position: absolute; top: 50%; transform: translateY(-50%); width: 2.5rem; height: 2.5rem; display: flex; items-center; justify-content: center; background-color: rgba(0,0,0,0.5); color: white; border-radius: 50%; font-size: 1.5rem; cursor: pointer; transition: background-color 0.3s; }
-        .image-nav-button:hover { background-color: rgba(0,0,0,0.8); }
-        .prev-button { left: 1rem; }
-        .next-button { right: 1rem; }
-        @media (max-width: 768px) {
-            .logo-text { font-size: 1.25rem; }
-            .header-nav { display: none; }
-            .mobile-menu-button { display: block; }
-            .main-image-container { height: 250px; }
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600&family=Noto+Sans:wght@300;400;600&family=Noto+Sans+Arabic:wght@300;400;600&display=swap');
+        body {
+            font-family: 'Cairo', 'Noto Sans Arabic', 'Noto Sans', sans-serif;
+            font-size: 0.75rem;
+            line-height: 1.4;
+            background: #f1f5f9;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
         }
-        /* Lightbox styles */
-        .lightbox { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.9); }
-        .lightbox-content { margin: auto; display: block; max-width: 90%; max-height: 90%; }
-        .close-lightbox { position: absolute; top: 15px; <?= htmlspecialchars($dir) === 'rtl' ? 'left: 35px;' : 'right: 35px;'; ?> color: #f1f1f1; font-size: 40px; font-weight: bold; transition: 0.3s; cursor: pointer; }
-        .close-lightbox:hover, .close-lightbox:focus { color: #bbb; text-decoration: none; cursor: pointer; }
-        
-        /* Property option styles */
-        .property-option {
-            border: 2px solid #e5e7eb; /* Tailwind gray-200 */
-            cursor: pointer;
-            transition: all 0.2s ease-in-out;
-            padding: 0.5rem 1rem; /* Adjusted padding for a better button feel */
-            border-radius: 0.375rem;
-            font-size: 0.875rem;
-            font-weight: 500;
+        main {
+            flex: 1;
+        }
+        .header-bg, .footer-bg {
+            background-color: #0f172a; /* اللون الكحلي المطلوب */
+            color: white;
+        }
+        .highlight {
+            background: #F59E0B;
+            color: white;
+        }
+        .product-card, .media-card, .category-card, .ad-card, .auction-card, .job-card {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            border-radius: 0.75rem;
+            overflow: hidden;
+            border: 1px solid #e2e8f0; /* إضافة الحدود المطلوبة */
+        }
+        .product-card:hover, .media-card:hover, .category-card:hover, .ad-card:hover, .auction-card:hover, .job-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+        }
+        .grade-badge {
+            font-size: 0.6rem;
+            font-weight: 600;
+            padding: 0.2rem 0.5rem;
+            border-radius: 9999px;
+            color: white;
+            min-width: 2rem;
             text-align: center;
         }
-        .property-option.selected {
-            border-color: #14b8a6; /* Tailwind teal-500 */
-            background-color: #f0fdfa; /* Tailwind teal-50 */
-            color: #0d9488; /* Tailwind teal-600 */
+        .product-images-container, .ad-media-container, .media-card-container, .auction-images-container {
+            position: relative;
+            overflow: hidden;
+            height: 120px;
+            border-radius: 0.75rem 0.75rem 0 0;
         }
-        .property-option.disabled {
-            background-color: #f3f4f6; /* Tailwind gray-100 */
-            color: #9ca3af; /* Tailwind gray-400 */
-            cursor: not-allowed;
-            opacity: 0.7;
-            pointer-events: none;
+        .product-images-container img, .ad-media-container img, .ad-media-container video, .media-card-container img, .media-card-container video, .auction-images-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: opacity 0.3s ease;
+        }
+        .product-images-container .img-indicator {
+            position: absolute;
+            bottom: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 6px;
+        }
+        .product-images-container .img-indicator-dot {
+            width: 8px;
+            height: 8px;
+            background-color: rgba(255, 255, 255, 0.6);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.3s ease;
+        }
+        .product-images-container .img-indicator-dot.active {
+            background-color: #F59E0B;
+            transform: scale(1.2);
+        }
+        .search-input-container {
+            position: relative;
+        }
+        .search-results-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background-color: white;
+            border: 1px solid #e2e8f0;
+            border-top: none;
+            border-radius: 0 0 0.5rem 0.5rem;
+            box-shadow: 0 3px 5px rgba(0, 0, 0, 0.1);
+            z-index: 50;
+            display: none;
+        }
+        .search-results-dropdown.active {
+            display: block;
+        }
+        .category-slider, .ad-slider, .auction-slider, .media-slider, .product-slider, .job-slider {
+            position: relative;
+        }
+        .category-card {
+            width: 100px;
+            text-align: center;
+            animation: slideIn 0.5s ease-in-out;
+            border: 1px solid #e2e8f0; /* إضافة حدود */
+        }
+        .category-card img {
+            width: 60px;
+            height: 60px;
         }
         
-        /* Turquoise Color for buttons */
-        .btn-turquoise {
-            background-color: #14b8a6; /* Tailwind teal-500 */
-            color: white;
-            transition: background-color 0.3s;
+        /* أنماط جديدة للعناصر المعدلة */
+        .category-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+            gap: 0; /* إزالة الفجوات بين البطاقات */
         }
-        .btn-turquoise:hover:not(:disabled) {
-            background-color: #0d9488; /* Tailwind teal-600 */
+        
+        .category-card-new {
+            margin: 0;
+            border-radius: 0;
+            border: 1px solid #e2e8f0;
         }
-        .btn-turquoise:disabled {
-            background-color: #9ca3af; /* Tailwind gray-400 */
-            cursor: not-allowed;
+        
+        .category-card-new:first-child {
+            border-top-left-radius: 0.5rem;
+            border-bottom-left-radius: 0.5rem;
         }
-        .text-turquoise {
-            color: #14b8a6;
+        
+        .category-card-new:last-child {
+            border-top-right-radius: 0.5rem;
+            border-bottom-right-radius: 0.5rem;
         }
-        .offer-badge {
+        
+        .category-icon {
+            width: 50px;
+            height: 50px;
+            object-fit: contain;
+        }
+        
+        .vendor-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+            gap: 0;
+        }
+        
+        .vendor-card-new {
+            margin: 0;
+            border-radius: 0;
+            border: 1px solid #e2e8f0;
+            padding: 0.5rem;
+        }
+        
+        .vendor-card-new:first-child {
+            border-top-left-radius: 0.5rem;
+            border-bottom-left-radius: 0.5rem;
+        }
+        
+        .vendor-card-new:last-child {
+            border-top-right-radius: 0.5rem;
+            border-bottom-right-radius: 0.5rem;
+        }
+        
+        .vendor-logo-new {
+            width: 40px;
+            height: 40px;
+            object-fit: contain;
+        }
+        
+        .group-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 10px;
+        }
+        
+        .group-card {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            border-radius: 0.75rem;
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+        }
+        
+        .group-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+        }
+        
+        .group-image {
+            width: 60px;
+            height: 60px;
+            object-fit: contain;
+        }
+        
+        .product-card-new {
+            border: 1px solid #e2e8f0;
+            border-radius: 0.5rem;
+            overflow: hidden;
+        }
+        
+        .job-type-badge {
+            font-size: 0.6rem;
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.25rem;
             display: inline-block;
-            background-color: #f97316; /* Tailwind orange-500 */
-            color: white;
+            margin-right: 0.3rem;
+        }
+        
+        .job-type-full-time { background-color: #10B981; color: white; }
+        .job-type-part-time { background-color: #3B82F6; color: white; }
+        .job-type-internship { background-color: #8B5CF6; color: white; }
+        .job-type-contract { background-color: #F59E0B; color: white; }
+        
+        @keyframes slideIn {
+            from { transform: translateY(15px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .swiper-button-next, .swiper-button-prev {
+            color: #0f172a !important;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        .swiper-button-next::after, .swiper-button-prev::after {
+            font-size: 1.5rem;
+        }
+        .swiper-button-next {
+            right: 0px !important;
+        }
+        .swiper-button-prev {
+            left: 0px !important;
+        }
+        .vendor-logo-carousel {
+            white-space: nowrap;
+            overflow: hidden;
+            box-sizing: border-box;
+            -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+            mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+        }
+        .vendor-logo-wrapper {
+            display: inline-block;
+            animation: carousel-move 20s linear infinite;
+        }
+        .vendor-logo-wrapper:hover {
+            animation-play-state: paused;
+        }
+        @keyframes carousel-move {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-100%); }
+        }
+        .vendor-logo-card {
+            display: inline-block;
+            margin: 0 1rem;
+        }
+        .ad-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+        }
+        .ad-modal-content {
+            background: white;
+            border-radius: 0.75rem;
+            max-width: 480px;
+            width: 90%;
+            padding: 1rem;
+            position: relative;
+        }
+        .ad-modal-content img, .ad-modal-content video {
+            width: 100%;
+            height: 160px;
+            object-fit: cover;
+            border-radius: 0.5rem;
+        }
+        .ad-modal-close {
+            position: absolute;
+            top: 0.5rem;
+            <?= $dir === 'rtl' ? 'left: 0.5rem;' : 'right: 0.5rem;'; ?>
+            cursor: pointer;
+            font-size: 1.2rem;
+            color: #1E3A8A;
+        }
+        .filter-dropdown {
+            position: relative;
+        }
+        .filter-content {
+            display: none;
+            position: absolute;
+            z-index: 50;
+            background-color: white;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            padding: 1rem;
+            max-height: 50vh;
+            overflow-y: auto;
+            <?= $dir === 'rtl' ? 'right: 0;' : 'left: 0;'; ?>
+            width: 250px;
+        }
+        .filter-content.active {
+            display: block;
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        /* Book icon style */
+        .book-icon {
+            color: #1E3A8A;
+            font-size: 1.2rem;
+            margin-right: 5px;
+        }
+        /* Rating stars */
+        .rating-stars {
+            color: #F59E0B;
+            font-size: 0.7rem;
+        }
+        /* Filter search */
+        .filter-search {
+            width: 100%;
             padding: 0.25rem 0.5rem;
-            border-radius: 0.375rem;
-            font-size: 0.75rem;
-            font-weight: bold;
-            text-transform: uppercase;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.25rem;
+            margin-bottom: 0.5rem;
+            font-size: 0.7rem;
+        }
+        .section-divider {
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 1rem;
+            margin-bottom: 1rem;
+        }
+        .section-header {
+            text-lg font-extrabold text-gray-800 mb-2
+        }
+        @media (min-width: 640px) {
+            .product-images-container, .ad-media-container, .media-card-container, .auction-images-container { height: 140px; }
+            .category-card { width: 110px; }
+            .category-card img { width: 70px; height: 70px; }
+            .swiper-container { height: 220px; }
+            .ad-modal-content img, .ad-modal-content video { height: 180px; }
+        }
+        @media (min-width: 1024px) {
+            .product-images-container, .ad-media-container, .media-card-container, .auction-images-container { height: 160px; }
+            .category-card { width: 130px; }
+            .category-card img { width: 80px; height: 80px; }
+            .swiper-container { height: 250px; }
+            .ad-modal-content img, .ad-modal-content video { height: 200px; }
+        }
+        @media (max-width: 639px) {
+            .header-nav { display: flex; align-items: center; gap: 0.5rem; }
+            .search-input-container { max-width: 100%; }
+            .container { padding-left: 0.5rem; padding-right: 0.5rem; margin-left: 0; margin-right: 0; width: 100%; }
+            .swiper-container { height: 180px; }
+            .category-card { width: 90px; }
+            .category-card img { width: 50px; height: 50px; }
         }
     </style>
 </head>
-<body class="bg-gray-100 text-gray-800">
-
-    <header class="bg-white shadow-md sticky top-0 z-50">
-        <div class="container mx-auto px-4 py-3 md:py-4 flex items-center justify-between">
+<body>
+    <header class="header-bg shadow-lg sticky top-0 z-50">
+        <div class="container mx-auto px-2 py-2 flex items-center justify-between">
             <div class="flex items-center">
-                <a href="index.php"><img src="https://mzmz.wuaze.com/platform/logo/main_logo.png?<?= time(); ?>" alt="easyoffer24 Logo" class="h-8 md:h-10 w-auto"></a>
-                <a href="index.php"><span class="logo-text text-lg md:text-xl font-extrabold ml-2 mr-2 text-gray-900"><?= htmlspecialchars($t['platform_name'] ?? 'easyoffer24'); ?></span></a>
+                <a href="index.php">
+                    <img src="/platform/logo/main_logo.png?<?= time(); ?>" alt="easyoffer24 Logo" class="h-8 md:h-10 w-auto">
+                </a>
+                <a href="index.php"><span class="logo-text text-sm font-extrabold ml-2 text-white"><?= $t['platform_name'] ?></span></a>
             </div>
-            <nav class="hidden md:flex items-center space-x-4 <?= htmlspecialchars($dir) === 'rtl' ? 'space-x-reverse' : ''; ?> header-nav">
+            <div class="flex-grow max-w-xs mx-2 search-input-container">
+                <form action="index.php" method="get" id="search-form">
+                    <div class="relative">
+                        <input type="text" name="search" id="search-input" placeholder="<?= $t['search_placeholder'] ?>" class="w-full pl-8 pr-2 py-1 border border-gray-200 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white/95 text-xs">
+                        <i class="fas fa-search absolute <?= $dir === 'rtl' ? 'right-2' : 'left-2'; ?> top-1/2 transform -translate-y-1/2 text-gray-500"></i>
+                    </div>
+                </form>
+                <div id="search-results" class="search-results-dropdown"></div>
+            </div>
+            <nav class="header-nav flex items-center space-x-2 <?= $dir === 'rtl' ? 'space-x-reverse' : ''; ?>">
                 <?php if (!isset($_SESSION['user_id'])): ?>
-                    <a href="https://mzmz.wuaze.com/platform/public/login.php" class="flex items-center text-turquoise font-semibold rounded-lg hover:bg-teal-50 px-3 py-2 transition duration-300">
-                        <i class="fas fa-sign-in-alt <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['login'] ?? 'Login'); ?>
-                    </a>
-                    <a href="https://mzmz.wuaze.com/platform/public/register_vendor.php" class="flex items-center btn-turquoise font-semibold rounded-lg px-3 py-2 transition duration-300">
-                        <i class="fas fa-user-plus <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['register'] ?? 'Register'); ?>
-                    </a>
+                    <a href="https://mzmz.wuaze.com/platform/public/login.php" class="px-2 py-1 text-white font-medium rounded-full hover:bg-blue-600 transition duration-300 text-xs"><?= $t['login'] ?></a>
+                    <a href="https://mzmz.wuaze.com/platform/public/register_vendor.php" class="px-2 py-1 highlight font-medium rounded-full hover:bg-yellow-600 transition duration-300 text-xs"><?= $t['register'] ?></a>
                 <?php else: ?>
-                    <a href="<?= htmlspecialchars($profile_link); ?>" class="flex items-center text-turquoise font-semibold rounded-lg hover:bg-teal-50 px-3 py-2 transition duration-300">
-                        <i class="fas fa-user-circle <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['my_profile'] ?? 'My Profile'); ?>
-                    </a>
-                    <a href="shopping_cart.php" class="relative btn-turquoise font-semibold rounded-lg px-3 py-2 transition duration-300">
-                        <i class="fas fa-shopping-cart"></i> <?= htmlspecialchars($t['cart_button'] ?? 'Cart'); ?>
-                        <?php if (isset($_SESSION['cart'])): ?>
-                            <span class="absolute -top-2 -right-2 inline-flex items-center justify-center w-5 h-5 text-xs font-bold leading-none text-white bg-red-600 rounded-full"><?= htmlspecialchars(count($_SESSION['cart'])); ?></span>
+                    <a href="<?= htmlspecialchars($profile_link); ?>" class="px-2 py-1 text-white font-medium rounded-full hover:bg-blue-600 transition duration-300 text-xs"><?= $t['my_profile'] ?></a>
+                    <a href="shopping_cart.php" class="relative px-2 py-1 highlight font-medium rounded-full hover:bg-yellow-600 transition duration-300 text-xs">
+                        <i class="fas fa-shopping-cart"></i>
+                        <?php if (!empty($_SESSION['cart'])): ?>
+                            <span class="absolute -top-1 -right-1 inline-flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-red-500 rounded-full"><?= count($_SESSION['cart']); ?></span>
                         <?php endif; ?>
                     </a>
                 <?php endif; ?>
-            </nav>
-            <button id="mobile-menu-button" class="md:hidden text-turquoise text-2xl">
-                <i class="fas fa-bars"></i>
-            </button>
-        </div>
-    </header>
-    <div id="mobile-menu" class="fixed top-0 <?= htmlspecialchars($dir) === 'rtl' ? 'right-0' : 'left-0'; ?> w-64 h-full bg-white shadow-xl z-50 transform <?= htmlspecialchars($dir) === 'rtl' ? 'translate-x-full' : '-translate-x-full'; ?> transition-transform duration-300 md:hidden">
-        <div class="p-4 border-b flex justify-between items-center">
-            <span class="text-xl font-bold"><?= htmlspecialchars($t['platform_name'] ?? 'easyoffer24'); ?></span>
-            <button id="close-menu-button" class="text-turquoise hover:text-teal-800 text-xl"><i class="fas fa-times"></i></button>
-        </div>
-        <nav class="flex flex-col p-4 space-y-4 text-sm">
-            <?php if (!isset($_SESSION['user_id'])): ?>
-                <a href="https://mzmz.wuaze.com/platform/public/login.php" class="font-semibold text-turquoise hover:bg-teal-50 p-2 rounded-md"><i class="fas fa-sign-in-alt <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['login'] ?? 'Login'); ?></a>
-                <a href="https://mzmz.wuaze.com/platform/public/register_vendor.php" class="font-semibold text-turquoise hover:bg-teal-50 p-2 rounded-md"><i class="fas fa-user-plus <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['register'] ?? 'Register'); ?></a>
-            <?php else: ?>
-                <a href="<?= htmlspecialchars($profile_link); ?>" class="font-semibold text-turquoise hover:bg-teal-50 p-2 rounded-md"><i class="fas fa-user-circle <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['my_profile'] ?? 'My Profile'); ?></a>
-                <a href="shopping_cart.php" class="font-semibold text-turquoise hover:bg-teal-50 p-2 rounded-md"><i class="fas fa-shopping-cart <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['cart_button'] ?? 'Cart'); ?></a>
-            <?php endif; ?>
-        </nav>
-    </div>
-
-    <main class="container mx-auto px-4 py-6">
-        <a href="index.php" class="text-turquoise hover:underline mb-4 text-sm block"><i class="fas fa-arrow-left <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['go_back'] ?? 'Go back'); ?></a>
-        
-        <div class="bg-white rounded-lg shadow-lg p-6 lg:p-8">
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
-                <div class="bg-gray-50 p-4 rounded-lg shadow-inner border border-gray-200">
-                    <div class="main-image-container mb-4">
-                        <img id="main-product-image" src="<?= htmlspecialchars($all_images[0] ?? 'https://mzmz.wuaze.com/platform/assets/placeholder.jpg'); ?>" alt="<?= htmlspecialchars($product['product_name'] ?? ''); ?>" class="rounded-lg main-image">
-                        <?php if (count($all_images) > 1): ?>
-                        <button id="prev-button" class="image-nav-button prev-button focus:outline-none">
-                            <i class="fas fa-chevron-<?= htmlspecialchars($dir) === 'rtl' ? 'right' : 'left'; ?>"></i>
-                        </button>
-                        <button id="next-button" class="image-nav-button next-button focus:outline-none">
-                            <i class="fas fa-chevron-<?= htmlspecialchars($dir) === 'rtl' ? 'left' : 'right'; ?>"></i>
-                        </button>
-                        <?php endif; ?>
+                <div class="relative inline-block">
+                    <button id="lang-menu-button" class="px-2 py-1 bg-blue-700/50 text-white rounded-full hover:bg-blue-600 border border-blue-500/50 transition duration-300 text-xs">
+                        <i class="fas fa-globe"></i>
+                    </button>
+                    <div id="lang-menu" class="hidden origin-top-right absolute <?= $dir === 'rtl' ? 'left-0' : 'right-0'; ?> mt-2 w-32 rounded-lg shadow-lg bg-white ring-1 ring-black ring-opacity-5 focus:outline-none z-10">
+                        <div class="py-1 text-xs">
+                            <a href="?lang=ar" class="text-gray-700 block px-3 py-1.5 hover:bg-blue-50">العربية</a>
+                            <a href="?lang=en" class="text-gray-700 block px-3 py-1.5 hover:bg-blue-50">English</a>
+                            <a href="?lang=hi" class="text-gray-700 block px-3 py-1.5 hover:bg-blue-50">हिन्दी</a>
+                            <a href="?lang=ur" class="text-gray-700 block px-3 py-1.5 hover:bg-blue-50">اردو</a>
+                            <a href="?lang=ml" class="text-gray-700 block px-3 py-1.5 hover:bg-blue-50">മലയാളം</a>
+                            <a href="?lang=fa" class="text-gray-700 block px-3 py-1.5 hover:bg-blue-50">فارسی</a>
+                        </div>
                     </div>
                 </div>
+                <div class="filter-dropdown">
+                    <button id="filter-toggle" class="px-2 py-1 bg-blue-700/50 text-white rounded-full hover:bg-blue-600 border border-blue-500/50 transition duration-300 text-xs flex items-center">
+                        <i class="fas fa-filter mr-1"></i> <?= $lang === 'ar' ? 'الفلاتر' : 'Filters' ?>
+                    </button>
+                    <div id="filter-content" class="filter-content">
+                        <h3 class="text-lg font-bold mb-3 border-b pb-2"><?= $t['filters'] ?></h3>
+                        <form action="index.php" method="get" id="filter-form">
+                            <input type="hidden" name="search" value="<?= htmlspecialchars($_GET['search'] ?? ''); ?>">
 
-                <div>
-                    <h1 class="text-2xl font-bold text-gray-900 mb-2"><?= htmlspecialchars($product['product_name'] ?? $t['product_not_found'] ?? 'Product Not Found'); ?></h1>
-                    
-                    <div class="flex items-center space-x-2 <?= htmlspecialchars($dir) === 'rtl' ? 'space-x-reverse' : ''; ?> mb-2 text-sm text-gray-600">
-                        <span><i class="fas fa-shop"></i> <?= htmlspecialchars($t['from_vendor'] ?? 'From Vendor'); ?>: <span class="font-bold"><?= htmlspecialchars($product['vendor_name'] ?? ''); ?></span></span>
-                    </div>
-                    
-                    <div class="flex items-baseline space-x-2 <?= htmlspecialchars($dir) === 'rtl' ? 'space-x-reverse' : ''; ?> mb-4">
-                        <span class="text-3xl font-extrabold text-turquoise" id="product-price-display">
-                            <?= htmlspecialchars(number_format($base_price, 2)); ?>
-                        </span>
-                        <span class="text-turquoise text-xl font-extrabold"><?= htmlspecialchars($t['currency'] ?? 'AED'); ?></span>
-                        <input type="hidden" id="product-id" value="<?= htmlspecialchars($product['id'] ?? ''); ?>">
-                        <input type="hidden" id="product-base-price" value="<?= htmlspecialchars($base_price); ?>">
-                        <input type="hidden" id="product-tax-rate" value="<?= htmlspecialchars($tax_rate); ?>">
-                        <input type="hidden" id="has-skus" value="<?= htmlspecialchars($has_skus ? '1' : '0'); ?>">
+                            <div class="mb-4">
+                                <h4 class="font-bold text-sm mb-2"><?= $t['price_range'] ?></h4>
+                                <input type="number" name="min_price" placeholder="<?= $t['min_price'] ?>" value="<?= htmlspecialchars($_GET['min_price'] ?? ''); ?>" class="filter-search mb-1">
+                                <input type="number" name="max_price" placeholder="<?= $t['max_price'] ?>" value="<?= htmlspecialchars($_GET['max_price'] ?? ''); ?>" class="filter-search">
+                            </div>
 
-                        <?php if ($discount_price > 0 && $original_price > $discount_price): ?>
-                            <span class="text-xl text-gray-500 line-through ml-4" id="product-original-price-display">
-                                <?= htmlspecialchars(number_format($original_price, 2)); ?>
-                            </span>
-                            <span class="ml-2 text-sm font-bold text-red-500">
-                                (-<?= htmlspecialchars($discount_percentage); ?>%)
-                            </span>
-                        <?php endif; ?>
-                    </div>
-                    
-                    <?php if (!empty($offers)): ?>
-                    <div class="mb-4">
-                        <h4 class="font-bold text-sm text-gray-900 mb-2"><?= htmlspecialchars($t['available_offers'] ?? 'Available Offers'); ?>:</h4>
-                        <ul class="list-disc list-inside space-y-1 text-sm text-gray-700">
-                            <?php foreach ($offers as $offer): ?>
-                                <?php if ($offer['offer_type'] === 'percentage'): ?>
-                                    <li><span class="offer-badge"><?= htmlspecialchars($offer['offer_value']); ?>% OFF</span> <?= htmlspecialchars($t['offer_details_percentage'] ?? 'خصم على هذا المنتج'); ?></li>
-                                <?php elseif ($offer['offer_type'] === 'buy_x_get_y'): ?>
-                                    <li>
-                                        <span class="offer-badge"><?= htmlspecialchars($t['offer_buy_x_get_y'] ?? 'Buy %s Get %s'); ?></span> 
-                                        <?= sprintf(htmlspecialchars($t['offer_details_buy_x_get_y'] ?? 'Buy %s and get %s for free.'), htmlspecialchars($offer['buy_quantity']), htmlspecialchars($offer['get_quantity'])); ?>
-                                    </li>
-                                <?php endif; ?>
-                            <?php endforeach; ?>
-                        </ul>
-                    </div>
-                    <?php endif; ?>
+                            <div class="mb-4">
+                                <h4 class="font-bold text-sm mb-2"><?= $t['categories'] ?></h4>
+                                <div class="max-h-40 overflow-y-auto">
+                                    <?php foreach ($categories as $category): ?>
+                                        <div class="flex items-center mb-1">
+                                            <input type="checkbox" name="category[]" id="cat-<?= htmlspecialchars($category['id']); ?>" value="<?= htmlspecialchars($category['id']); ?>" class="form-checkbox h-4 w-4 text-blue-600 transition duration-150 ease-in-out" <?= (isset($_GET['category']) && in_array($category['id'], $_GET['category'])) ? 'checked' : ''; ?>>
+                                            <label for="cat-<?= htmlspecialchars($category['id']); ?>" class="mr-2 text-sm text-gray-700"><?= htmlspecialchars($lang === 'ar' ? $category['name_ar'] : $category['name_en']); ?></label>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
 
-                    <div class="mt-8">
-                        <h3 class="text-xl font-bold text-gray-900 mb-4 border-b pb-2"><?= htmlspecialchars($t['product_properties'] ?? 'خصائص المنتج'); ?></h3>
-                        <?php if (!empty($product_properties)): ?>
-                            <div id="product-properties-container">
-                                <?php foreach ($product_properties as $propertyData): ?>
-                                    <div class="mb-4 property-group" data-property-name-id="<?= htmlspecialchars($propertyData['name_id']); ?>">
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">
-                                            <?= htmlspecialchars($propertyData['name']); ?>:
-                                        </label>
-                                        <div class="flex flex-wrap gap-2">
-                                            <?php foreach ($propertyData['values'] as $value): ?>
-                                                <button type="button" 
-                                                        class="property-option"
-                                                        data-property-value-id="<?= htmlspecialchars($value['id']); ?>"
-                                                        data-property-name-id="<?= htmlspecialchars($propertyData['name_id']); ?>">
-                                                    <?= htmlspecialchars($value['value']); ?>
-                                                </button>
+                            <div class="mb-4">
+                                <h4 class="font-bold text-sm mb-2">التجار</h4>
+                                <div class="max-h-40 overflow-y-auto">
+                                    <?php foreach ($vendors as $vendor): ?>
+                                        <div class="flex items-center mb-1">
+                                            <input type="checkbox" name="vendor[]" id="vendor-<?= htmlspecialchars($vendor['id']); ?>" value="<?= htmlspecialchars($vendor['id']); ?>" class="form-checkbox h-4 w-4 text-blue-600 transition duration-150 ease-in-out" <?= (isset($_GET['vendor']) && in_array($vendor['id'], $_GET['vendor'])) ? 'checked' : ''; ?>>
+                                            <label for="vendor-<?= htmlspecialchars($vendor['id']); ?>" class="mr-2 text-sm text-gray-700">
+                                                <?= htmlspecialchars($vendor['vendor_name']); ?> (<?= htmlspecialchars($vendor['product_count']); ?>)
+                                            </label>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+
+                            <div class="mb-4">
+                                <h4 class="font-bold text-sm mb-2"><?= $t['cities'] ?></h4>
+                                <div class="max-h-40 overflow-y-auto">
+                                    <?php foreach ($cities as $city): ?>
+                                        <div class="flex items-center mb-1">
+                                            <input type="checkbox" name="city[]" id="city-<?= htmlspecialchars($city['id']); ?>" value="<?= htmlspecialchars($city['id']); ?>" class="form-checkbox h-4 w-4 text-blue-600 transition duration-150 ease-in-out" <?= (isset($_GET['city']) && in_array($city['id'], $_GET['city'])) ? 'checked' : ''; ?>>
+                                            <label for="city-<?= htmlspecialchars($city['id']); ?>" class="mr-2 text-sm text-gray-700"><?= htmlspecialchars($city['name']); ?></label>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+
+                            <div class="mt-4 flex justify-between">
+                                <button type="submit" class="bg-blue-600 text-white px-3 py-1 text-xs rounded-full hover:bg-blue-700 transition duration-300"><?= $t['apply_filters'] ?></button>
+                                <a href="index.php" class="text-xs text-gray-500 hover:underline"><?= $t['reset'] ?></a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <button id="mobile-menu-button" class="md:hidden text-white text-base">
+                    <i class="fas fa-bars"></i>
+                    </button>
+            </nav>
+        </div>
+    </header>
+    <div id="mobile-menu" class="fixed top-0 <?= $dir === 'rtl' ? 'right-0' : 'left-0'; ?> w-56 h-full bg-white shadow-2xl z-50 transform <?= $dir === 'rtl' ? 'translate-x-full' : '-translate-x-full'; ?> transition-transform duration-300 ease-in-out md:hidden">
+        <div class="p-3 border-b flex justify-between items-center header-bg">
+            <span class="text-sm font-bold text-white"><?= $t['platform_name'] ?></span>
+            <button id="close-menu-button" class="text-white hover:text-gray-200 text-base">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <nav class="flex flex-col p-3 space-y-2 text-xs">
+            <?php if (!isset($_SESSION['user_id'])): ?>
+                <a href="https://mzmz.wuaze.com/platform/public/login.php" class="text-gray-700 hover:bg-blue-50 p-2 rounded-md"><i class="fas fa-sign-in-alt <?= $dir === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= $t['login'] ?></a>
+                <a href="https://mzmz.wuaze.com/platform/public/register_vendor.php" class="text-gray-700 hover:bg-blue-50 p-2 rounded-md"><i class="fas fa-user-plus <?= $dir === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= $t['register'] ?></a>
+            <?php else: ?>
+                <a href="<?= htmlspecialchars($profile_link); ?>" class="text-gray-700 hover:bg-blue-50 p-2 rounded-md"><i class="fas fa-user-circle <?= $dir === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= $t['my_profile'] ?></a>
+                <a href="shopping_cart.php" class="text-gray-700 hover:bg-blue-50 p-2 rounded-md"><i class="fas fa-shopping-cart <?= $dir === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= $t['cart_button'] ?></a>
+            <?php endif; ?>
+            <div class="border-t pt-2 mt-2">
+                <h4 class="text-xs font-bold text-gray-500 mb-1"><?= $t['select_language'] ?></h4>
+                <div class="flex flex-col space-y-1">
+                    <a href="?lang=ar" class="text-gray-700 hover:bg-blue-50 p-2 rounded-md text-xs">العربية</a>
+                    <a href="?lang=en" class="text-gray-700 hover:bg-blue-50 p-2 rounded-md text-xs">English</a>
+                    <a href="?lang=hi" class="text-gray-700 hover:bg-blue-50 p-2 rounded-md text-xs">हिन्दी</a>
+                    <a href="?lang=ur" class="text-gray-700 hover:bg-blue-50 p-2 rounded-md text-xs">اردو</a>
+                    <a href="?lang=ml" class="text-gray-700 hover:bg-blue-50 p-2 rounded-md text-xs">മലയാളം</a>
+                    <a href="?lang=fa" class="text-gray-700 hover:bg-blue-50 p-2 rounded-md text-xs">فارسی</a>
+                </div>
+            </div>
+        </nav>
+    </div>
+    <main class="container mx-auto px-2 py-3">
+
+    <?php if (!empty($current_vendor_filter)): ?>
+        <?php
+            $filtered_vendor_id = reset($current_vendor_filter);
+            $filtered_vendor_name = '';
+            foreach ($vendors as $v) {
+                if ($v['id'] == $filtered_vendor_id) {
+                    $filtered_vendor_name = $v['vendor_name'];
+                    break;
+                }
+            }
+        ?>
+        <div class="my-4 p-4 bg-white rounded-lg shadow-sm flex items-center justify-between">
+            <span class="text-sm font-bold text-gray-800"><?= $t['showing_products_for'] ?>: <?= htmlspecialchars($filtered_vendor_name); ?></span>
+            <a href="/platform/vendor/vendor_dashboard.php?vendor_id=<?= htmlspecialchars($filtered_vendor_id); ?>" class="bg-blue-600 text-white px-4 py-2 text-sm rounded-full hover:bg-blue-700 transition duration-300">
+                <?= $t['visit_vendor_page'] ?>
+            </a>
+        </div>
+    <?php endif; ?>
+
+    <section class="mb-5 section-divider">
+        <h2 class="section-header"><i class="fas fa-bullhorn book-icon"></i> <?= $t['advertisements'] ?></h2>
+        <div class="swiper-container ad-slider">
+            <div class="swiper-wrapper">
+                <?php if (!empty($ads)): ?>
+                    <?php foreach ($ads as $ad): ?>
+                        <div class="swiper-slide">
+                            <div class="ad-card bg-white rounded-lg shadow-md hover:shadow-xl relative flex flex-col p-3 cursor-pointer"
+                                 data-ad-id="<?= htmlspecialchars($ad['id']); ?>"
+                                 data-vendor-id="<?= htmlspecialchars($ad['vendor_id']); ?>"
+                                 data-ad-media-type="<?= htmlspecialchars($ad['media_type']); ?>"
+                                 data-ad-target="<?= htmlspecialchars($ad['target_url']); ?>"
+                                 data-ad-image="<?= htmlspecialchars($ad['image_url']); ?>"
+                                 data-ad-impressions="<?= htmlspecialchars($ad['impressions']); ?>"
+                                 data-ad-clicks="<?= htmlspecialchars($ad['clicks']); ?>">
+                                <div class="ad-media-container">
+                                    <?php if ($ad['media_type'] === 'video'): ?>
+                                        <video src="<?= htmlspecialchars($ad['image_url']); ?>" class="w-full h-full object-cover rounded-md" muted playsinline></video>
+                                    <?php else: ?>
+                                        <img src="<?= htmlspecialchars($ad['image_url']); ?>" alt="<?= htmlspecialchars($ad['title']); ?>" class="w-full h-full object-cover rounded-md">
+                                    <?php endif; ?>
+                                </div>
+                                <div class="p-3">
+                                    <h3 class="text-sm font-bold text-gray-800 truncate"><?= htmlspecialchars($ad['title']); ?></h3>
+                                    <p class="text-xs text-gray-500 mt-1"><?= htmlspecialchars($ad['description']); ?></p>
+                                    <div class="flex justify-between items-center mt-2 text-xs text-gray-500">
+                                        <span><i class="fas fa-eye"></i> <span class="impression-count" data-ad-id="<?= htmlspecialchars($ad['id']); ?>"><?= htmlspecialchars($ad['impressions']); ?></span></span>
+                                        <span><i class="fas fa-mouse-pointer"></i> <span class="click-count" data-ad-id="<?= htmlspecialchars($ad['id']); ?>"><?= htmlspecialchars($ad['clicks']); ?></span></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <div class="swiper-slide">
+                        <div class="bg-yellow-100 text-yellow-600 p-3 rounded-md text-center text-sm shadow-sm"><?= $t['no_ads_found'] ?></div>
+                    </div>
+                <?php endif; ?>
+            </div>
+            <div class="swiper-button-next"></div>
+            <div class="swiper-button-prev"></div>
+        </div>
+    </section>
+
+    <!-- قسم الفئات المعدل -->
+    <section class="mb-5 section-divider">
+        <h2 class="section-header animate-pulse"><i class="fas fa-book book-icon"></i> <?= $t['all_categories'] ?></h2>
+        <div class="category-grid">
+            <?php if (!empty($categories)): ?>
+                <?php foreach ($categories as $category): ?>
+                    <div class="category-card-new bg-white text-center p-3">
+                        <a href="index.php?category[]=<?= htmlspecialchars($category['id']); ?>">
+                            <img src="../<?= htmlspecialchars($category['image_url']); ?>" alt="<?= htmlspecialchars($lang === 'ar' ? $category['name_ar'] : $category['name_en']); ?>" class="category-icon mx-auto mb-2">
+                            <h3 class="text-xs font-bold text-gray-800 truncate">
+                                <?= htmlspecialchars($lang === 'ar' ? $category['name_ar'] : $category['name_en']); ?>
+                            </h3>
+                        </a>
+                    </div>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <div class="bg-yellow-100 text-yellow-600 p-3 rounded-md text-center text-xs shadow-sm"><?= $t['no_categories'] ?></div>
+            <?php endif; ?>
+        </div>
+    </section>
+
+    <!-- قسم المجموعات الجديد -->
+    <section class="mb-5 section-divider">
+        <h2 class="section-header"><i class="fas fa-layer-group book-icon"></i> المجموعات</h2>
+        <div class="group-grid">
+            <?php if (!empty($groups)): ?>
+                <?php foreach ($groups as $group): ?>
+                    <div class="group-card bg-white rounded-md shadow-sm text-center p-3">
+                        <a href="/platform/group/group_list_details.php?group_id=<?= htmlspecialchars($group['group_id']); ?>">
+                            <img src="/platform/uploads/groups/<?= htmlspecialchars(basename($group['group_image'])); ?>" alt="<?= htmlspecialchars($group['group_name']); ?>" class="group-image mx-auto mb-2">
+                            <h3 class="text-xs font-bold text-gray-800 truncate"><?= htmlspecialchars($group['group_name']); ?></h3>
+                        </a>
+                    </div>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <div class="bg-yellow-100 text-yellow-600 p-3 rounded-md text-center text-xs shadow-sm">لا توجد مجموعات</div>
+            <?php endif; ?>
+        </div>
+    </section>
+
+    <!-- قسم التجار المعدل -->
+    <section class="mb-5 section-divider">
+        <h2 class="section-header"><i class="fas fa-store book-icon"></i> <?= $t['vendors_title'] ?></h2>
+        <div class="vendor-grid">
+            <?php foreach ($vendors as $vendor): ?>
+                <div class="vendor-card-new bg-white text-center">
+                    <a href="/platform/public/all_vonders_list_details.php?vendor_id=<?= htmlspecialchars($vendor['id']); ?>" title="<?= htmlspecialchars($vendor['vendor_name']); ?>">
+                        <img src="/platform/uploads/vendors/logo/<?= htmlspecialchars(basename($vendor['logo'])); ?>" alt="<?= htmlspecialchars($vendor['vendor_name']); ?> logo" class="vendor-logo-new mx-auto">
+                        <p class="text-xs text-gray-800 truncate mt-1"><?= htmlspecialchars($vendor['vendor_name']); ?></p>
+                    </a>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </section>
+
+    <!-- قسم الوظائف الجديد -->
+    <section class="mb-5 section-divider">
+        <h2 class="section-header"><i class="fas fa-briefcase book-icon"></i> الوظائف المتاحة</h2>
+        <div class="swiper-container job-slider">
+            <div class="swiper-wrapper">
+                <?php if (!empty($jobs)): ?>
+                    <?php foreach ($jobs as $job): ?>
+                        <div class="swiper-slide">
+                            <div class="job-card bg-white rounded-lg shadow-md hover:shadow-xl relative flex flex-col p-3">
+                                <div class="flex justify-between items-start mb-2">
+                                    <h3 class="text-sm font-bold text-gray-800 truncate"><?= htmlspecialchars($job['job_title']); ?></h3>
+                                    <span class="job-type-badge job-type-<?= htmlspecialchars(str_replace(' ', '-', $job['job_type'])); ?>">
+                                        <?= htmlspecialchars($job['job_type']); ?>
+                                    </span>
+                                </div>
+                                <p class="text-xs text-gray-600 mb-2">
+                                    <i class="fas fa-map-marker-alt mr-1"></i>
+                                    <?= htmlspecialchars($job['location']); ?>
+                                </p>
+                                <p class="text-xs text-gray-600 mb-2">
+                                    <i class="fas fa-money-bill-wave mr-1"></i>
+                                    <?= htmlspecialchars($job['salary_range']); ?>
+                                </p>
+                                <p class="text-xs text-gray-500 mb-3">
+                                    <i class="fas fa-tag mr-1"></i>
+                                    <?= htmlspecialchars($lang === 'ar' ? $job['category_name_ar'] : $job['category_name_en']); ?>
+                                </p>
+                                <div class="mt-auto">
+                                    <a href="/platform/jobs/job_application.php?job_id=<?= htmlspecialchars($job['job_id']); ?>" class="bg-blue-600 text-white px-3 py-1 text-xs rounded-full hover:bg-blue-700 transition duration-300 block text-center">
+                                        التقديم على الوظيفة
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <div class="swiper-slide">
+                        <div class="bg-yellow-100 text-yellow-600 p-3 rounded-md text-center text-sm shadow-sm">لا توجد وظائف متاحة حالياً</div>
+                    </div>
+                <?php endif; ?>
+            </div>
+            <div class="swiper-button-next"></div>
+            <div class="swiper-button-prev"></div>
+        </div>
+    </section>
+
+    <section class="mb-5 section-divider">
+        <h2 class="section-header"><i class="fas fa-gavel book-icon"></i> <?= $t['active_auctions'] ?></h2>
+        <div class="swiper-container auction-slider">
+            <div class="swiper-wrapper">
+                <?php if (!empty($active_auctions)): ?>
+                    <?php foreach ($active_auctions as $auction): ?>
+                        <div class="swiper-slide">
+                            <div class="auction-card bg-white rounded-lg shadow-md hover:shadow-xl relative flex flex-col p-3">
+                                <a href="/platform/auctions/auction_bids_live.php?id=<?= htmlspecialchars($auction['id']); ?>">
+                                    <?php
+                                        $media_url = '/platform/uploads/auctions/' . basename($auction['file_path']);
+                                        $media_type = $auction['media_type'];
+                                    ?>
+                                    <div class="auction-images-container">
+                                        <?php if ($media_type === 'video'): ?>
+                                            <video src="<?= htmlspecialchars($media_url); ?>" class="w-full h-full object-cover rounded-md" muted playsinline></video>
+                                        <?php else: ?>
+                                            <img src="<?= htmlspecialchars($media_url); ?>" alt="<?= htmlspecialchars($auction['title']); ?>" class="w-full h-full object-cover rounded-md">
+                                        <?php endif; ?>
+                                    </div>
+                                    <h3 class="text-xs font-bold text-gray-800 truncate mt-2"><?= htmlspecialchars($auction['title']); ?></h3>
+                                    <p class="text-xs text-gray-500 mt-1"><?= $t['start_price'] ?>: <span class="text-green-600 font-bold"><?= htmlspecialchars($auction['start_price']); ?> <?= $t['currency'] ?></span></p>
+                                    <div class="text-xs text-gray-500 mt-1" data-end-time="<?= htmlspecialchars($auction['end_time']); ?>">
+                                        <p><?= $t['start_time'] ?>: <span class="text-blue-500"><?= date('Y-m-d H:i', strtotime($auction['start_time'])) ?></span></p>
+                                        <p><?= $t['time_left'] ?>: <span class="countdown-timer text-red-600 font-bold"></span></p>
+                                    </div>
+                                </a>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <div class="swiper-slide">
+                        <div class="bg-yellow-100 text-yellow-600 p-3 rounded-md text-center text-sm shadow-sm"><?= $t['no_active_auctions'] ?></div>
+                    </div>
+                <?php endif; ?>
+            </div>
+            <div class="swiper-button-next"></div>
+            <div class="swiper-button-prev"></div>
+        </div>
+    </section>
+
+    <section class="mb-5 section-divider">
+        <h2 class="section-header"><i class="fas fa-video book-icon"></i> <?= $t['videos_from_vendors'] ?></h2>
+        <div class="swiper-container media-slider">
+            <div class="swiper-wrapper">
+                <?php if (!empty($vendor_media)): ?>
+                    <?php foreach ($vendor_media as $media): ?>
+                        <div class="swiper-slide">
+                            <div class="media-card bg-white rounded-lg shadow-md">
+                                <div class="media-card-container">
+                                    <?php if ($media['media_type'] === 'video'): ?>
+                                        <video src="<?= htmlspecialchars($media['media_url']); ?>" class="w-full h-full" controls muted playsinline></video>
+                                    <?php else: ?>
+                                        <img src="<?= htmlspecialchars($media['media_url']); ?>" alt="<?= htmlspecialchars($media['vendor_name']); ?>'s media" class="w-full h-full object-cover">
+                                    <?php endif; ?>
+                                </div>
+                                <div class="p-3">
+                                    <p class="text-xs font-bold text-gray-800 truncate"><?= htmlspecialchars($media['vendor_name']); ?></p>
+                                    <p class="text-xs text-gray-500 mt-1"><?= $t['uploaded'] ?>: <?= date('Y-m-d', strtotime($media['uploaded_at'])); ?></p>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <div class="swiper-slide">
+                        <div class="bg-yellow-100 text-yellow-600 p-3 rounded-md text-center text-sm shadow-sm"><?= $t['no_media'] ?></div>
+                    </div>
+                <?php endif; ?>
+            </div>
+            <div class="swiper-button-next"></div>
+            <div class="swiper-button-prev"></div>
+        </div>
+    </section>
+
+    <section class="mb-5 section-divider">
+        <h2 class="section-header"><i class="fas fa-book book-icon"></i> <?= $t['latest_offers'] ?></h2>
+        <div class="swiper-container product-slider latest-offers-slider">
+            <div class="swiper-wrapper">
+                <?php if (!empty($latest_offers)): ?>
+                    <?php foreach ($latest_offers as $product): ?>
+                        <div class="swiper-slide">
+                            <div class="product-card-new bg-white rounded-lg shadow-md hover:shadow-xl relative flex flex-col" data-product-id="<?= htmlspecialchars($product['id']); ?>">
+                                <a href="product_details.php?id=<?= htmlspecialchars($product['id']); ?>" onclick="trackProductClick(event, <?= htmlspecialchars($product['id']); ?>)">
+                                    <div class="product-images-container">
+                                        <?php foreach ($product['images'] as $index => $image_url): ?>
+                                            <img src="../<?= htmlspecialchars($image_url); ?>" alt="<?= htmlspecialchars($product['product_name']); ?>" class="absolute top-0 left-0 w-full h-full opacity-0 <?= $index === 0 ? 'opacity-100' : '' ?>" data-index="<?= $index ?>">
+                                        <?php endforeach; ?>
+                                        <div class="img-indicator">
+                                            <?php foreach ($product['images'] as $index => $image_url): ?>
+                                                <div class="img-indicator-dot <?= $index === 0 ? 'active' : '' ?>" data-index="<?= $index ?>"></div>
                                             <?php endforeach; ?>
                                         </div>
                                     </div>
-                                <?php endforeach; ?>
-                            </div>
-                        <?php else: ?>
-                            <p class="text-sm text-gray-700 leading-relaxed"><?= htmlspecialchars($t['no_properties'] ?? 'لا يوجد خصائص متاحة لهذا المنتج.'); ?></p>
-                        <?php endif; ?>
-                    </div>
-                    
-                    <div class="flex flex-wrap gap-x-4 gap-y-2 text-sm text-gray-500 mb-4 border-b pb-4">
-                        <span><i class="fas fa-warehouse"></i> <?= htmlspecialchars($t['stock'] ?? 'In Stock'); ?>: <span class="font-bold" id="product-quantity-display">
-                            <?= htmlspecialchars($total_quantity); ?>
-                        </span></span>
-                        <span><i class="fas fa-shopping-cart"></i> <?= htmlspecialchars($t['sold'] ?? 'Sold'); ?>: <span class="font-bold"><?= htmlspecialchars($product['total_sales'] ?? 0); ?></span></span>
-                        <span><i class="fas fa-star"></i> <?= htmlspecialchars($t['ratings'] ?? 'Ratings'); ?>: <span class="font-bold"><?= htmlspecialchars($product['total_ratings'] ?? 0); ?></span></span>
-                        <span class="flex items-center"><i class="fas fa-truck-fast"></i> <?= htmlspecialchars($t['shipping'] ?? 'Shipping'); ?>: <span class="font-bold ml-1"><?= $shipping_status; ?></span></span>
-                        <span><i class="fas fa-percent"></i> <?= htmlspecialchars($t['tax_rate'] ?? 'Tax Rate'); ?>: <span class="font-bold"><?= htmlspecialchars(number_format($tax_rate, 2)); ?>%</span></span>
-                    </div>
-                    
-                    <div class="mb-4 p-3 bg-gray-100 rounded-md">
-                        <p class="font-bold text-sm"><?= htmlspecialchars($t['price_with_tax'] ?? 'Price Including Tax'); ?>:</p>
-                        <p class="text-xl font-extrabold text-turquoise" id="product-price-with-tax-display">
-                            <?= htmlspecialchars(number_format($base_price + ($base_price * $tax_rate / 100), 2)); ?>
-                        </p>
-                    </div>
-
-                    <form action="shopping_cart.php" method="POST" id="add-to-cart-form">
-                        <input type="hidden" name="add_to_cart" value="1">
-                        <input type="hidden" name="product_id" value="<?= htmlspecialchars($product['id'] ?? ''); ?>">
-                        <input type="hidden" name="property_value_ids" id="property-value-ids-input">
-                        <button type="submit" id="add-to-cart-button" class="w-full btn-turquoise py-3 rounded-lg font-bold text-sm hover:bg-teal-700 transition duration-300" disabled title="">
-                            <i class="fas fa-cart-plus <?= htmlspecialchars($dir) === 'rtl' ? 'ml-2' : 'mr-2'; ?>"></i> <?= htmlspecialchars($t['add_to_cart_button'] ?? 'Add to Cart'); ?>
-                        </button>
-                    </form>
-                </div>
-            </div>
-            
-            <hr class="my-8">
-
-            <div class="mt-8">
-                <h3 class="text-xl font-bold text-gray-900 mb-4 border-b pb-2"><?= htmlspecialchars($t['product_description'] ?? 'وصف المنتج'); ?></h3>
-                <p class="text-sm text-gray-700 leading-relaxed"><?= nl2br(htmlspecialchars($product['description'] ?? $t['no_description'] ?? 'لا يوجد وصف متاح لهذا المنتج.')); ?></p>
-            </div>
-            
-            <hr class="my-8">
-
-            <div class="mt-8 relative p-6 rounded-lg shadow-md bg-white">
-                <h3 class="text-xl font-bold text-gray-900 mb-4 border-b pb-2"><?= htmlspecialchars($t['vendor_transparency'] ?? 'شفافية التاجر'); ?></h3>
-                <div class="flex items-center gap-2 mb-2">
-                    <div class="flex items-center gap-2">
-                        <p class="text-sm text-gray-700 flex items-center gap-2">
-                            <i class="fas fa-shop text-2xl text-turquoise"></i>
-                            <span class="font-bold"><?= htmlspecialchars($product['vendor_name'] ?? ''); ?></span>
-                        </p>
-                        <span class="grade-badge font-bold px-2 py-1 rounded-full shadow-sm <?= htmlspecialchars($vendor_transparency['color'] ?? ''); ?>">
-                            <?= htmlspecialchars($vendor_transparency['grade'] ?? 'N/A'); ?> (<?= htmlspecialchars($vendor_transparency['description'] ?? 'N/A'); ?>)
-                        </span>
-                    </div>
-                </div>
-                <p class="text-sm text-gray-700 mb-2"><?= htmlspecialchars($t['complaints_vendor'] ?? 'الشكاوى ضد التاجر'); ?>: <span class="font-bold text-red-500"><?= htmlspecialchars($product['vendor_complaint_count'] ?? 0); ?></span></p>
-                
-                <?php if (!empty($product_complaints)): ?>
-                <div class="mt-4">
-                    <h4 class="font-bold text-sm text-red-600 mb-2"><?= htmlspecialchars($t['product_complaints'] ?? 'شكاوى على هذا المنتج'); ?>:</h4>
-                    <div class="space-y-2 text-xs text-gray-700">
-                        <?php foreach ($product_complaints as $complaint): ?>
-                            <div class="bg-red-50 p-2 rounded-md border border-red-200">
-                                <p><?= htmlspecialchars($complaint['complaint_text']); ?></p>
-                                <p class="text-gray-500 mt-1">
-                                    <i class="fas fa-user-circle"></i> <?= htmlspecialchars($complaint['user_name'] ?? 'User'); ?> | <i class="far fa-calendar-alt"></i> Date: <?= htmlspecialchars(date('Y-m-d', strtotime($complaint['complaint_date']))); ?>
-                                </p>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
-                <?php endif; ?>
-            </div>
-            
-            <hr class="my-8">
-
-            <div class="mt-8">
-                <h3 class="text-xl font-bold text-gray-900 mb-4 border-b pb-2"><?= htmlspecialchars($t['product_ratings'] ?? 'تقييمات المنتج'); ?></h3>
-                <div class="space-y-4">
-                    <?php if (empty($reviews_by_star[5]) && empty($reviews_by_star[4]) && empty($reviews_by_star[3]) && empty($reviews_by_star[2]) && empty($reviews_by_star[1])): ?>
-                         <div class="text-center text-gray-500"><?= htmlspecialchars($t['no_ratings_yet'] ?? 'No ratings yet.'); ?></div>
-                    <?php else: ?>
-                        <?php for ($star = 5; $star >= 1; $star--): ?>
-                        <div class="p-4 bg-gray-50 rounded-lg shadow-sm border border-gray-200">
-                            <div class="flex items-center text-sm mb-2">
-                                <div class="text-yellow-400">
-                                    <?php for ($i = 0; $i < $star; $i++): ?>
-                                        <i class="fas fa-star"></i>
-                                    <?php endfor; ?>
-                                    <?php for ($i = $star; $i < 5; $i++): ?>
-                                        <i class="far fa-star"></i>
-                                    <?php endfor; ?>
-                                </div>
-                                <span class="text-gray-600 ml-2">(<?= htmlspecialchars($star_ratings[$star]); ?>)</span>
-                            </div>
-                            <div class="space-y-2">
-                                <?php if (empty($reviews_by_star[$star])): ?>
-                                     <p class="text-xs text-gray-500"><?= htmlspecialchars($t['no_comments_for_rating'] ?? 'No comments for this rating yet.'); ?></p>
-                                <?php else: ?>
-                                    <?php foreach ($reviews_by_star[$star] as $review): ?>
-                                        <div class="bg-white p-2 rounded-md border border-gray-100">
-                                            <p class="text-sm"><?= nl2br(htmlspecialchars($review['comment'])); ?></p>
-                                            <p class="text-xs text-gray-500 mt-1">
-                                                <i class="fas fa-user-circle"></i> <?= htmlspecialchars($review['user_name']); ?> | <i class="far fa-calendar-alt"></i> Date: <?= htmlspecialchars(date('Y-m-d', strtotime($review['review_date']))); ?>
-                                            </p>
+                                    <div class="p-3">
+                                        <span class="block text-xs text-gray-500 truncate"><?= htmlspecialchars($product['vendor_name']); ?></span>
+                                        <h3 class="text-xs font-bold text-gray-800 truncate"><?= htmlspecialchars($product['product_name']); ?></h3>
+                                        <div class="flex justify-between items-center mt-2">
+                                            <span class="text-sm font-bold text-red-600"><?= htmlspecialchars($product['discount_price']); ?> <?= $t['currency'] ?></span>
+                                            <span class="text-xs text-gray-500 line-through"><?= htmlspecialchars($product['original_price']); ?> <?= $t['currency'] ?></span>
                                         </div>
-                                    <?php endforeach; ?>
-                                <?php endif; ?>
+                                        <div class="flex justify-between items-center mt-2 text-xs text-gray-500">
+                                            <span class="product-viewed-count" data-product-id="<?= htmlspecialchars($product['id']); ?>"><?= htmlspecialchars($product['viewed_count']); ?> <?= $t['views'] ?></span>
+                                            <div class="flex items-center">
+                                                <span class="rating-stars"><?= renderStarRating($product['avg_rating']); ?></span>
+                                                <span class="text-gray-600 ml-1">(<?= htmlspecialchars($product['total_ratings']); ?>)</span>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center mt-1 text-xs text-gray-500">
+                                            <i class="fas fa-mouse-pointer"></i>
+                                            <span class="ml-1 product-clicked-count" data-product-id="<?= htmlspecialchars($product['id']); ?>"><?= htmlspecialchars($product['clicked_count']); ?> <?= $t['clicks'] ?></span>
+                                        </div>
+                                        <?php
+                                        $grade = getVendorGradeAndColor($vendor_complaints[$product['vendor_id']] ?? 0);
+                                        ?>
+                                        <span class="grade-badge bg-<?= htmlspecialchars($grade['color']); ?> mt-2"><?= htmlspecialchars($grade['grade']); ?></span>
+                                    </div>
+                                </a>
                             </div>
                         </div>
-                        <?php endfor; ?>
-                    <?php endif; ?>
-                </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <div class="swiper-slide">
+                        <div class="bg-yellow-100 text-yellow-600 p-3 rounded-md text-center text-sm shadow-sm"><?= $t['no_products_found'] ?></div>
+                    </div>
+                <?php endif; ?>
             </div>
+            <div class="swiper-button-next"></div>
+            <div class="swiper-button-prev"></div>
         </div>
+    </section>
+
+    <section class="mb-5 section-divider">
+        <h2 class="section-header"><i class="fas fa-book book-icon"></i> <?= $t['best_sellers'] ?></h2>
+        <div class="swiper-container product-slider best-sellers-slider">
+            <div class="swiper-wrapper">
+                <?php if (!empty($best_sellers)): ?>
+                    <?php foreach ($best_sellers as $product): ?>
+                        <div class="swiper-slide">
+                            <div class="product-card-new bg-white rounded-lg shadow-md hover:shadow-xl relative flex flex-col" data-product-id="<?= htmlspecialchars($product['id']); ?>">
+                                <a href="product_details.php?id=<?= htmlspecialchars($product['id']); ?>" onclick="trackProductClick(event, <?= htmlspecialchars($product['id']); ?>)">
+                                    <div class="product-images-container">
+                                        <?php foreach ($product['images'] as $index => $image_url): ?>
+                                            <img src="../<?= htmlspecialchars($image_url); ?>" alt="<?= htmlspecialchars($product['product_name']); ?>" class="absolute top-0 left-0 w-full h-full opacity-0 <?= $index === 0 ? 'opacity-100' : '' ?>" data-index="<?= $index ?>">
+                                        <?php endforeach; ?>
+                                        <div class="img-indicator">
+                                            <?php foreach ($product['images'] as $index => $image_url): ?>
+                                                <div class="img-indicator-dot <?= $index === 0 ? 'active' : '' ?>" data-index="<?= $index ?>"></div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                    <div class="p-3">
+                                        <span class="block text-xs text-gray-500 truncate"><?= htmlspecialchars($product['vendor_name']); ?></span>
+                                        <h3 class="text-xs font-bold text-gray-800 truncate"><?= htmlspecialchars($product['product_name']); ?></h3>
+                                        <div class="flex justify-between items-center mt-2">
+                                            <span class="text-sm font-bold text-red-600"><?= htmlspecialchars($product['discount_price']); ?> <?= $t['currency'] ?></span>
+                                            <span class="text-xs text-gray-500 line-through"><?= htmlspecialchars($product['original_price']); ?> <?= $t['currency'] ?></span>
+                                        </div>
+                                        <div class="flex justify-between items-center mt-2 text-xs text-gray-500">
+                                            <span class="product-viewed-count" data-product-id="<?= htmlspecialchars($product['id']); ?>"><?= htmlspecialchars($product['viewed_count']); ?> <?= $t['views'] ?></span>
+                                            <div class="flex items-center">
+                                                <span class="rating-stars"><?= renderStarRating($product['avg_rating']); ?></span>
+                                                <span class="text-gray-600 ml-1">(<?= htmlspecialchars($product['total_ratings']); ?>)</span>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center mt-1 text-xs text-gray-500">
+                                            <i class="fas fa-mouse-pointer"></i>
+                                            <span class="ml-1 product-clicked-count" data-product-id="<?= htmlspecialchars($product['id']); ?>"><?= htmlspecialchars($product['clicked_count']); ?> <?= $t['clicks'] ?></span>
+                                        </div>
+                                        <?php
+                                        $grade = getVendorGradeAndColor($vendor_complaints[$product['vendor_id']] ?? 0);
+                                        ?>
+                                        <span class="grade-badge bg-<?= htmlspecialchars($grade['color']); ?> mt-2"><?= htmlspecialchars($grade['grade']); ?></span>
+                                    </div>
+                                </a>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <div class="swiper-slide">
+                        <div class="bg-yellow-100 text-yellow-600 p-3 rounded-md text-center text-sm shadow-sm"><?= $t['no_products_found'] ?></div>
+                    </div>
+                <?php endif; ?>
+            </div>
+            <div class="swiper-button-next"></div>
+            <div class="swiper-button-prev"></div>
+        </div>
+    </section>
+
+    <section class="mb-5 section-divider">
+        <h2 class="section-header"><i class="fas fa-book book-icon"></i> <?= $t['welcome_offers'] ?></h2>
+        <div class="swiper-container product-slider welcome-offers-slider">
+            <div class="swiper-wrapper">
+                <?php if (!empty($welcome_offers)): ?>
+                    <?php foreach ($welcome_offers as $product): ?>
+                        <div class="swiper-slide">
+                            <div class="product-card-new bg-white rounded-lg shadow-md hover:shadow-xl relative flex flex-col" data-product-id="<?= htmlspecialchars($product['id']); ?>">
+                                <a href="product_details.php?id=<?= htmlspecialchars($product['id']); ?>" onclick="trackProductClick(event, <?= htmlspecialchars($product['id']); ?>)">
+                                    <div class="product-images-container">
+                                        <?php foreach ($product['images'] as $index => $image_url): ?>
+                                            <img src="../<?= htmlspecialchars($image_url); ?>" alt="<?= htmlspecialchars($product['product_name']); ?>" class="absolute top-0 left-0 w-full h-full opacity-0 <?= $index === 0 ? 'opacity-100' : '' ?>" data-index="<?= $index ?>">
+                                        <?php endforeach; ?>
+                                        <div class="img-indicator">
+                                            <?php foreach ($product['images'] as $index => $image_url): ?>
+                                                <div class="img-indicator-dot <?= $index === 0 ? 'active' : '' ?>" data-index="<?= $index ?>"></div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                    <div class="p-3">
+                                        <span class="block text-xs text-gray-500 truncate"><?= htmlspecialchars($product['vendor_name']); ?></span>
+                                        <h3 class="text-xs font-bold text-gray-800 truncate"><?= htmlspecialchars($product['product_name']); ?></h3>
+                                        <div class="flex justify-between items-center mt-2">
+                                            <span class="text-sm font-bold text-red-600"><?= htmlspecialchars($product['discount_price']); ?> <?= $t['currency'] ?></span>
+                                            <span class="text-xs text-gray-500 line-through"><?= htmlspecialchars($product['original_price']); ?> <?= $t['currency'] ?></span>
+                                        </div>
+                                        <div class="flex justify-between items-center mt-2 text-xs text-gray-500">
+                                            <span class="product-viewed-count" data-product-id="<?= htmlspecialchars($product['id']); ?>"><?= htmlspecialchars($product['viewed_count']); ?> <?= $t['views'] ?></span>
+                                            <div class="flex items-center">
+                                                <span class="rating-stars"><?= renderStarRating($product['avg_rating']); ?></span>
+                                                <span class="text-gray-600 ml-1">(<?= htmlspecialchars($product['total_ratings']); ?>)</span>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center mt-1 text-xs text-gray-500">
+                                            <i class="fas fa-mouse-pointer"></i>
+                                            <span class="ml-1 product-clicked-count" data-product-id="<?= htmlspecialchars($product['id']); ?>"><?= htmlspecialchars($product['clicked_count']); ?> <?= $t['clicks'] ?></span>
+                                        </div>
+                                        <?php
+                                        $grade = getVendorGradeAndColor($vendor_complaints[$product['vendor_id']] ?? 0);
+                                        ?>
+                                        <span class="grade-badge bg-<?= htmlspecialchars($grade['color']); ?> mt-2"><?= htmlspecialchars($grade['grade']); ?></span>
+                                    </div>
+                                </a>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <div class="swiper-slide">
+                        <div class="bg-yellow-100 text-yellow-600 p-3 rounded-md text-center text-sm shadow-sm"><?= $t['no_products_found'] ?></div>
+                    </div>
+                <?php endif; ?>
+            </div>
+            <div class="swiper-button-next"></div>
+            <div class="swiper-button-prev"></div>
+        </div>
+    </section>
+
     </main>
 
-    <div id="imageLightbox" class="lightbox">
-        <span class="close-lightbox">&times;</span>
-        <img class="lightbox-content" id="lightboxImage">
-    </div>
+    <footer class="footer-bg text-center py-4 text-white text-xs mt-auto">
+        <p>&copy; <?= date('Y'); ?> <?= $t['platform_name'] ?>. <?= $t['all_rights_reserved'] ?></p>
+        <div class="flex justify-center space-x-4 mt-2 <?= $dir === 'rtl' ? 'space-x-reverse' : ''; ?>">
+            <a href="#" class="hover:text-gray-300 transition-colors duration-200"><i class="fab fa-facebook-f"></i></a>
+            <a href="#" class="hover:text-gray-300 transition-colors duration-200"><i class="fab fa-twitter"></i></a>
+            <a href="#" class="hover:text-gray-300 transition-colors duration-200"><i class="fab fa-instagram"></i></a>
+            <a href="#" class="hover:text-gray-300 transition-colors duration-200"><i class="fab fa-linkedin-in"></i></a>
+        </div>
+    </footer>
 
+    <script src="https://unpkg.com/swiper@8.4.7/swiper-bundle.min.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const propertyGroups = document.querySelectorAll('.property-group');
-            const propertyOptions = document.querySelectorAll('.property-option');
-            const priceElement = document.getElementById('product-price-display');
-            const priceWithTaxElement = document.getElementById('product-price-with-tax-display');
-            const quantityElement = document.getElementById('product-quantity-display');
-            const selectedPropertiesInput = document.getElementById('property-value-ids-input');
-            const addToCartButton = document.getElementById('add-to-cart-button');
-            const basePrice = parseFloat('<?= htmlspecialchars($base_price); ?>');
-            const taxRate = parseFloat('<?= htmlspecialchars($tax_rate); ?>');
-            const totalQuantity = parseInt('<?= htmlspecialchars($total_quantity); ?>');
-            const hasSkus = document.getElementById('has-skus').value === '1';
-            const hasProperties = propertyGroups.length > 0;
-            
-            // جلب بيانات SKUs والخصائص من PHP إلى JavaScript
-            const skusData = <?= json_encode($skus_data); ?>;
-            const productProperties = <?= json_encode($product_properties); ?>;
-            
-            // خريطة لتحديد ترتيب الخصائص
-            const propertyOrder = productProperties.map(prop => prop.name_id);
-
-            // إذا لم يكن هناك خصائص، تمكين الزر مباشرة
-            if (!hasProperties) {
-                addToCartButton.disabled = totalQuantity <= 0;
-                if (totalQuantity <= 0) {
-                    addToCartButton.title = "<?= htmlspecialchars($t['out_of_stock'] ?? 'Out of stock'); ?>";
-                }
-            }
-
-            function updateProductInfo() {
-                const selectedOptions = Array.from(document.querySelectorAll('.property-option.selected'));
-                
-                let currentPrice = basePrice;
-                let currentQuantity = totalQuantity;
-                let isCombinationFound = false;
-
-                if (hasSkus && hasProperties && selectedOptions.length > 0) {
-                    const selectedIds = selectedOptions.map(option => parseInt(option.getAttribute('data-property-value-id'))).sort((a, b) => a - b);
-                    const allPropsSelected = selectedOptions.length === propertyGroups.length;
-
-                    if (allPropsSelected) {
-                        const matchingSku = skusData.find(sku => {
-                            const skuIdsString = sku.property_value_ids.sort((a, b) => a - b).join(',');
-                            const selectedIdsString = selectedIds.join(',');
-                            return skuIdsString === selectedIdsString;
-                        });
-
-                        if (matchingSku) {
-                            currentPrice = basePrice + matchingSku.price_modifier;
-                            currentQuantity = matchingSku.quantity;
-                            isCombinationFound = true;
-                        } else {
-                            currentQuantity = 0; // Combination exists but is out of stock or not found
-                            isCombinationFound = false;
-                        }
-                    } else {
-                        // Not all properties selected, show filtered quantity or default
-                        const availableSkus = skusData.filter(sku => {
-                            let matches = true;
-                            selectedIds.forEach(id => {
-                                if (!sku.property_value_ids.includes(id)) {
-                                    matches = false;
-                                }
-                            });
-                            return matches;
-                        });
-                        
-                        currentQuantity = availableSkus.reduce((sum, sku) => sum + sku.quantity, 0);
-                        isCombinationFound = false;
-                    }
-                } else if (!hasSkus || !hasProperties) {
-                    // No SKUs or no properties, use the main product quantity
-                    currentQuantity = totalQuantity;
-                    isCombinationFound = true; // Always considered found for simple products
-                }
-
-                const priceWithTax = currentPrice * (1 + taxRate / 100);
-
-                priceElement.textContent = currentPrice.toFixed(2);
-                priceWithTaxElement.textContent = priceWithTax.toFixed(2);
-                quantityElement.textContent = currentQuantity;
-                
-                if (hasSkus && hasProperties) {
-                    const selectedIds = selectedOptions.map(option => parseInt(option.getAttribute('data-property-value-id')));
-                    selectedPropertiesInput.value = isCombinationFound ? selectedIds.join(',') : '';
-                    
-                    // تحديث حالة زر "أضف إلى السلة"
-                    addToCartButton.disabled = !isCombinationFound || currentQuantity <= 0;
-                } else {
-                    selectedPropertiesInput.value = '';
-                    addToCartButton.disabled = currentQuantity <= 0;
-                }
-                
-                // إضافة رسالة توضيحية عندما يكون الزر معطلاً
-                if (addToCartButton.disabled) {
-                    if (currentQuantity <= 0) {
-                        addToCartButton.title = "<?= htmlspecialchars($t['out_of_stock'] ?? 'Out of stock'); ?>";
-                    } else if (hasSkus && hasProperties && !isCombinationFound) {
-                        addToCartButton.title = "<?= htmlspecialchars($t['select_all_properties'] ?? 'Please select all properties'); ?>";
-                    }
-                } else {
-                    addToCartButton.title = "";
-                }
-            }
-
-            function filterAvailableOptions() {
-                if (!hasSkus || !hasProperties) return; // No filtering needed for simple products
-
-                const selectedOptions = Array.from(document.querySelectorAll('.property-option.selected'));
-                const selectedIds = selectedOptions.map(option => parseInt(option.getAttribute('data-property-value-id')));
-                
-                propertyGroups.forEach((group, index) => {
-                    const groupOptions = group.querySelectorAll('.property-option');
-                    
-                    const selectedInThisGroup = selectedOptions.find(opt => opt.closest('.property-group') === group);
-                    const otherSelectedIds = selectedIds.filter(id => id !== (selectedInThisGroup ? parseInt(selectedInThisGroup.getAttribute('data-property-value-id')) : null));
-
-                    groupOptions.forEach(option => {
-                        const optionId = parseInt(option.getAttribute('data-property-value-id'));
-                        
-                        // Check if this option is part of ANY valid SKU combination with other selected options
-                        const isValid = skusData.some(sku => {
-                            const isSelected = otherSelectedIds.every(id => sku.property_value_ids.includes(id));
-                            return isSelected && sku.property_value_ids.includes(optionId) && sku.quantity > 0;
-                        });
-
-                        if (isValid) {
-                            option.classList.remove('disabled');
-                        } else {
-                            option.classList.add('disabled');
-                        }
-                    });
-                });
-
-                updateProductInfo();
-            }
-
-            // إضافة مستمعي الأحداث لجميع أزرار الخصائص
-            propertyOptions.forEach(option => {
-                option.addEventListener('click', function() {
-                    const isSelected = this.classList.contains('selected');
-                    const parentGroup = this.closest('.property-group');
-                    
-                    // إزالة فئة 'selected' من جميع الخيارات في نفس المجموعة
-                    parentGroup.querySelectorAll('.property-option').forEach(opt => opt.classList.remove('selected'));
-                    
-                    if (!isSelected && !this.classList.contains('disabled')) {
-                        this.classList.add('selected');
-                    }
-                    
-                    filterAvailableOptions();
-                });
-            });
-
-            // Handle image gallery and lightbox
-            const mainImage = document.getElementById('main-product-image');
-            const lightbox = document.getElementById('imageLightbox');
-            const lightboxImage = document.getElementById('lightboxImage');
-            const closeBtn = document.querySelector('.close-lightbox');
-
-            let currentImageIndex = 0;
-            const images = <?= json_encode($all_images); ?>;
-
-            function updateImage() {
-                if (images.length > 0) {
-                    mainImage.src = images[currentImageIndex];
-                }
-            }
-
-            document.getElementById('next-button')?.addEventListener('click', function(e) {
-                e.preventDefault();
-                currentImageIndex = (currentImageIndex + 1) % images.length;
-                updateImage();
-            });
-
-            document.getElementById('prev-button')?.addEventListener('click', function(e) {
-                e.preventDefault();
-                currentImageIndex = (currentImageIndex - 1 + images.length) % images.length;
-                updateImage();
-            });
-
-            // Lightbox
-            mainImage.addEventListener('click', function() {
-                lightbox.style.display = "block";
-                lightboxImage.src = this.src;
-            });
-
-            closeBtn.addEventListener('click', function() {
-                lightbox.style.display = "none";
-            });
-
-            window.addEventListener('click', function(event) {
-                if (event.target == lightbox) {
-                    lightbox.style.display = "none";
-                }
-            });
-
-            // Handle mobile menu
-            const mobileMenuBtn = document.getElementById('mobile-menu-button');
-            const mobileMenu = document.getElementById('mobile-menu');
-            const closeMenuBtn = document.getElementById('close-menu-button');
-            const dir = '<?= htmlspecialchars($dir); ?>';
-
-            mobileMenuBtn.addEventListener('click', () => {
-                mobileMenu.classList.remove(dir === 'rtl' ? 'translate-x-full' : '-translate-x-full');
-            });
-
-            closeMenuBtn.addEventListener('click', () => {
-                mobileMenu.classList.add(dir === 'rtl' ? 'translate-x-full' : '-translate-x-full');
-            });
-
-            if (hasProperties) {
-                filterAvailableOptions(); // Initial call to set up the options
-            } else {
-                updateProductInfo(); // Initial call for products without properties
+        // Swiper initialization
+        const categorySwiper = new Swiper('.category-slider', {
+            slidesPerView: 'auto',
+            spaceBetween: 10,
+            freeMode: true,
+            navigation: {
+                nextEl: '.category-slider .swiper-button-next',
+                prevEl: '.category-slider .swiper-button-prev',
+            },
+            breakpoints: {
+                640: {
+                    slidesPerView: 4,
+                    spaceBetween: 15,
+                },
+                1024: {
+                    slidesPerView: 6,
+                    spaceBetween: 20,
+                },
             }
         });
+
+        const adSwiper = new Swiper('.ad-slider', {
+            slidesPerView: 2,
+            spaceBetween: 10,
+            loop: true,
+            autoplay: {
+                delay: 5000,
+                disableOnInteraction: false,
+            },
+            navigation: {
+                nextEl: '.ad-slider .swiper-button-next',
+                prevEl: '.ad-slider .swiper-button-prev',
+            },
+            breakpoints: {
+                640: {
+                    slidesPerView: 3,
+                    spaceBetween: 15,
+                },
+                768: {
+                    slidesPerView: 4,
+                    spaceBetween: 20,
+                },
+                1024: {
+                    slidesPerView: 5,
+                    spaceBetween: 25,
+                },
+            },
+            on: {
+                slideChangeTransitionEnd: function() {
+                    const activeSlide = this.slides[this.realIndex];
+                    const adId = activeSlide.querySelector('.ad-card').getAttribute('data-ad-id');
+                    trackAdImpression(adId);
+                }
+            }
+        });
+
+        const productSwipers = document.querySelectorAll('.product-slider');
+        productSwipers.forEach(slider => {
+            new Swiper(slider, {
+                slidesPerView: 2,
+                spaceBetween: 10,
+                navigation: {
+                    nextEl: slider.querySelector('.swiper-button-next'),
+                    prevEl: slider.querySelector('.swiper-button-prev'),
+                },
+                breakpoints: {
+                    640: {
+                        slidesPerView: 3,
+                        spaceBetween: 15,
+                    },
+                    768: {
+                        slidesPerView: 4,
+                        spaceBetween: 20,
+                    },
+                    1024: {
+                        slidesPerView: 5,
+                        spaceBetween: 25,
+                    },
+                    1280: {
+                        slidesPerView: 6,
+                        spaceBetween: 30,
+                    }
+                }
+            });
+        });
+
+        new Swiper('.auction-slider', {
+            slidesPerView: 2,
+            spaceBetween: 10,
+            navigation: {
+                nextEl: '.auction-slider .swiper-button-next',
+                prevEl: '.auction-slider .swiper-button-prev',
+            },
+            breakpoints: {
+                640: {
+                    slidesPerView: 3,
+                    spaceBetween: 15,
+                },
+                768: {
+                    slidesPerView: 4,
+                    spaceBetween: 20,
+                },
+                1024: {
+                    slidesPerView: 5,
+                    spaceBetween: 25,
+                },
+                1280: {
+                    slidesPerView: 6,
+                    spaceBetween: 30,
+                }
+            }
+        });
+        
+        new Swiper('.media-slider', {
+            slidesPerView: 2,
+            spaceBetween: 10,
+            navigation: {
+                nextEl: '.media-slider .swiper-button-next',
+                prevEl: '.media-slider .swiper-button-prev',
+            },
+            breakpoints: {
+                640: {
+                    slidesPerView: 3,
+                    spaceBetween: 15,
+                },
+                768: {
+                    slidesPerView: 4,
+                    spaceBetween: 20,
+                },
+            }
+        });
+
+        // Initialize job slider
+        new Swiper('.job-slider', {
+            slidesPerView: 2,
+            spaceBetween: 10,
+            navigation: {
+                nextEl: '.job-slider .swiper-button-next',
+                prevEl: '.job-slider .swiper-button-prev',
+            },
+            breakpoints: {
+                640: {
+                    slidesPerView: 3,
+                    spaceBetween: 15,
+                },
+                768: {
+                    slidesPerView: 4,
+                    spaceBetween: 20,
+                },
+                1024: {
+                    slidesPerView: 5,
+                    spaceBetween: 25,
+                },
+            }
+        });
+
+        // Ad click tracking and redirection
+        document.querySelectorAll('.ad-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                e.preventDefault();
+                const adId = card.getAttribute('data-ad-id');
+                const vendorId = card.getAttribute('data-vendor-id');
+                
+                trackAdClick(adId);
+
+                if (vendorId) {
+                    window.location.href = `index.php?vendor[]=${vendorId}`;
+                } else {
+                    const targetUrl = card.getAttribute('data-ad-target');
+                    if (targetUrl) {
+                         window.location.href = targetUrl;
+                    }
+                }
+            });
+        });
+
+        // Tracking Functions
+        function trackAdImpression(adId) {
+            fetch('track_ad_impression.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `ad_id=${adId}`
+            }).then(response => response.json()).then(data => {
+                if (data.status === 'success') {
+                    console.log('Ad impression tracked successfully for ad ID: ' + adId);
+                }
+            });
+        }
+        
+        function trackAdClick(adId) {
+            fetch('track_ad_click.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `ad_id=${adId}`
+            }).then(response => response.json()).then(data => {
+                if (data.status === 'success') {
+                    console.log('Ad click tracked successfully for ad ID: ' + adId);
+                }
+            });
+        }
+        
+        function trackProductClick(event, productId) {
+            event.preventDefault();
+            fetch('track_product_click.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `product_id=${productId}`
+            }).then(response => response.json()).then(data => {
+                if (data.status === 'success') {
+                    console.log('Product click tracked successfully for product ID: ' + productId);
+                    window.location.href = event.target.href;
+                }
+            });
+        }
+        
+        function trackProductImpression(productId) {
+            fetch('track_product_impression.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `product_id=${productId}`
+            }).then(response => response.json()).then(data => {
+                if (data.status === 'success') {
+                    console.log('Product impression tracked successfully for product ID: ' + productId);
+                }
+            });
+        }
+        
+        // Dynamic stats update and initial load
+        function updateStats() {
+            // Update Ad stats
+            const adIds = Array.from(document.querySelectorAll('.ad-card')).map(card => card.getAttribute('data-ad-id'));
+            if (adIds.length > 0) {
+                fetch(`get_ad_stats.php?ad_ids=${adIds.join(',')}`).then(response => response.json()).then(data => {
+                    if (data.status === 'success') {
+                        data.stats.forEach(ad => {
+                            document.querySelector(`.ad-card[data-ad-id="${ad.id}"] .impression-count`).textContent = ad.impressions;
+                            document.querySelector(`.ad-card[data-ad-id="${ad.id}"] .click-count`).textContent = ad.clicks;
+                        });
+                    }
+                });
+            }
+
+            // Update Product stats
+            const productIds = Array.from(document.querySelectorAll('.product-card')).map(card => card.getAttribute('data-product-id'));
+            if (productIds.length > 0) {
+                fetch(`get_product_stats.php?product_ids=${productIds.join(',')}`).then(response => response.json()).then(data => {
+                    if (data.status === 'success') {
+                        data.stats.forEach(product => {
+                            document.querySelector(`.product-card[data-product-id="${product.id}"] .product-viewed-count`).textContent = product.viewed;
+                            document.querySelector(`.product-card[data-product-id="${product.id}"] .product-clicked-count`).textContent = product.clicked;
+                        });
+                    }
+                });
+            }
+        }
+        
+        // Initial and periodic update
+        document.addEventListener('DOMContentLoaded', () => {
+            updateStats();
+            setInterval(updateStats, 10000); // Update every 10 seconds
+            
+            // Product image slider functionality
+            document.querySelectorAll('.product-card').forEach(card => {
+                const images = card.querySelectorAll('.product-images-container img');
+                const dots = card.querySelectorAll('.img-indicator-dot');
+                if (images.length <= 1) return;
+                
+                let currentImageIndex = 0;
+                setInterval(() => {
+                    images[currentImageIndex].classList.remove('opacity-100');
+                    dots[currentImageIndex].classList.remove('active');
+                    currentImageIndex = (currentImageIndex + 1) % images.length;
+                    images[currentImageIndex].classList.add('opacity-100');
+                    dots[currentImageIndex].classList.add('active');
+                }, 3000);
+            });
+        });
+        
+        // Countdown timer for auctions
+        function updateAuctionTimers() {
+            document.querySelectorAll('.auction-card').forEach(card => {
+                const timerElement = card.querySelector('.countdown-timer');
+                if (!timerElement) return;
+
+                const endTime = new Date(card.querySelector('[data-end-time]').getAttribute('data-end-time')).getTime();
+                const now = new Date().getTime();
+                const timeLeft = endTime - now;
+
+                if (timeLeft < 0) {
+                    timerElement.textContent = '<?= $t['auction_ended'] ?>';
+                    timerElement.style.color = 'red';
+                    return;
+                }
+
+                const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+                const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+
+                timerElement.textContent = `${days}d ${hours}h ${minutes}m ${seconds}s`;
+            });
+        }
+        setInterval(updateAuctionTimers, 1000);
+        updateAuctionTimers(); // Initial call to display immediately
+
+        // Filter dropdown toggle
+        const filterToggle = document.getElementById('filter-toggle');
+        const filterContent = document.getElementById('filter-content');
+
+        filterToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            filterContent.classList.toggle('active');
+        });
+        document.addEventListener('click', (e) => {
+            if (!filterContent.contains(e.target) && !filterToggle.contains(e.target)) {
+                filterContent.classList.remove('active');
+            }
+        });
+
+        // Language menu toggle
+        const langMenuButton = document.getElementById('lang-menu-button');
+        const langMenu = document.getElementById('lang-menu');
+        langMenuButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            langMenu.classList.toggle('hidden');
+        });
+        document.addEventListener('click', (e) => {
+            if (!langMenu.contains(e.target) && !langMenuButton.contains(e.target)) {
+                langMenu.classList.add('hidden');
+            }
+        });
+
+        // Track impressions for visible product cards
+        const observerOptions = {
+            root: null,
+            rootMargin: '0px',
+            threshold: 0.5
+        };
+        const productObserver = new IntersectionObserver((entries, observer) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const productId = entry.target.getAttribute('data-product-id');
+                    if (productId) {
+                        trackProductImpression(productId);
+                        // Stop observing once the impression is tracked
+                        observer.unobserve(entry.target);
+                    }
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.product-card').forEach(card => {
+            productObserver.observe(card);
+        });
+
     </script>
 </body>
-</html>
+</html
